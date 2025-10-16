@@ -30,6 +30,7 @@ if (req.method === "POST") {
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
+console.log("MEGHA_CHAT: Incoming message stream started at", new Date());
 
   // Read body
   let bodyText = "";
