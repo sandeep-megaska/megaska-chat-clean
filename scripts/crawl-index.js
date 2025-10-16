@@ -1,4 +1,4 @@
-import { pLimit } from "p-limit";
+import pLimit from "p-limit";
 
 import fetch from "node-fetch";
 import cheerio from "cheerio";
