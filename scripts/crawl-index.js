@@ -1,3 +1,5 @@
+import { pLimit } from "p-limit";
+
 import fetch from "node-fetch";
 import cheerio from "cheerio";
 import OpenAI from "openai";
