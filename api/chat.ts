@@ -187,3 +187,52 @@ Prefer bullet points for specs/sizing.`
     }
   }
 }
+// api/chat.js — minimal SSE echo so you can test the widget wiring first
+export const config = { api: { bodyParser: false } };
+
+async function readJSON(req) {
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  const txt = Buffer.concat(chunks).toString("utf8") || "{}";
+  try { return JSON.parse(txt); } catch { return {}; }
+}
+
+function pickOrigin(req) {
+  const allowed = new Set((process.env.ALLOWED_ORIGINS || "")
+    .split(",").map(s => s.trim()).filter(Boolean));
+  const o = req.headers.origin;
+  return (o && allowed.has(o)) ? o : "*";
+}
+
+export default async function handler(req, res) {
+  const origin = pickOrigin(req);
+  if (req.method === "OPTIONS") {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Headers", "content-type");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    return res.status(204).end();
+  }
+  if (req.method !== "POST") {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    return res.status(405).json({ error: "Method Not Allowed" });
+  }
+
+  const body = await readJSON(req);
+  const message = (body?.message || "").toString();
+
+  // SSE headers
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Headers", "content-type");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+
+  // Stream a tiny response in the exact shape your widget expects
+  res.write(`data: ${JSON.stringify({ output_text: "Hi! Megha is online." })}\n\n`);
+  res.write(`data: ${JSON.stringify({ output_text: " You said: " + message })}\n\n`);
+  res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+  res.end();
+}
+
