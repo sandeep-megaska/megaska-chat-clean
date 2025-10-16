@@ -162,11 +162,12 @@ Prefer bullet points for specs/sizing.`
     });
 
     for await (const part of stream) {
-      const delta = part?.choices?.[0]?.delta?.content;
-      if (typeof delta === "string" && delta.length) {
-        res.write(`data: ${JSON.stringify({ text: delta })}\n\n`);
-      }
-    }
++   const delta = part?.choices?.[0]?.delta?.content;
++   if (typeof delta === "string" && delta.length) {
++     // match the widget's expected key
++     res.write(`data: ${JSON.stringify({ output_text: delta })}\n\n`);
++   }
++ }
 
     // 5) Send sources and close
     res.write(`event: sources\ndata: ${JSON.stringify(rows.map(r => ({
