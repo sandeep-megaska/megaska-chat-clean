@@ -209,7 +209,7 @@ Write a short, specific reply in MEGASKA’s voice. If about delivery, say 3–5
   if (!r.ok) return context; // fallback: return raw context
   const j = await r.json();
   return j.choices?.[0]?.message?.content?.trim() || context;
-}
+
 
 // ---------- HTTP handler ----------
 export default async function handler(req) {
