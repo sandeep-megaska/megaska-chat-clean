@@ -1,6 +1,11 @@
 {
+  "name": "megaska-chat",
+  "version": "1.0.0",
+  "description": "Megaska intelligent assistant project with OpenAI and Supabase",
   "type": "module",
+  "main": "api/chat.js",
   "scripts": {
+    "dev": "node api/ping.js",
     "crawl:index": "node scripts/crawl-index.js",
     "db:init": "node scripts/db-init.js"
   },
@@ -8,25 +13,20 @@
     "cheerio": "^1.0.0",
     "node-fetch": "^3.3.2",
     "openai": "^4.55.0",
-    "pg": "^8.11.3"
-  }
-}
-
-{
-  "name": "megaska-chat",
-  "version": "1.0.0",
-  "private": true,
-  "engines": { "node": "18.x" },
-  "scripts": {
-    "crawl:index": "node scripts/crawl-index.js --site=https://megaska.com/sitemap.xml --max=2000"
+    "pg": "^8.11.3",
+    "dotenv": "^16.4.5"
   },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.45.4",
-    "fast-xml-parser": "^4.4.1",
-    "jsdom": "^24.1.0",
-    "node-fetch": "2.6.12",
-    "openai": "^4.58.1",
-    "p-limit": "^6.1.0"
-  }
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "megaska",
+    "chat",
+    "supabase",
+    "openai",
+    "crawler",
+    "shopify"
+  ],
+  "author": "Sandeep Damodaran",
+  "license": "MIT"
 }
-
