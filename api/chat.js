@@ -22,6 +22,22 @@ function sbHeaders(json = true) {
   if (json) h['Content-Type'] = 'application/json';
   return h;
 }
+const context = top
+  .map(m => `URL: ${m.url}\nCONTENT:\n${m.content}`)
+  .join('\n\n---\n\n')
+  .slice(0, 10000); // a bit smaller so sizing info stays salient
+
+const seen = new Set();
+const top = [];
+for (const m of matches || []) {
+  if (!seen.has(m.url)) { seen.add(m.url); top.push(m); }
+  if (top.length >= 6) break; // was 5
+}
+const sources = top.slice(0,4).map(s => ({ url: s.url, similarity: s.similarity }));
+const sys = `You are MEGHA, Megaska's AI sales assistant. Use ONLY the CONTEXT for factual answers
+(policies, sizing/size charts, materials, shipping). If the customer asks about sizes, prioritize
+size charts and how to measure. Be concise, friendly, and add a subtle call-to-action. If it isn't
+in context, say you're not sure and ask a guiding follow-up.`;
 
 // RPC: match_web_chunks
 async function sbMatchChunks(queryEmbedding, count = 8, thresh = 0.68) {
