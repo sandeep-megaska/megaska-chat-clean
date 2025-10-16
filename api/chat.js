@@ -1,4 +1,22 @@
 // api/chat.js
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  // Use SERVICE ROLE on the server to bypass RLS
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+);
+
+try {
+  const t0 = Date.now();
+  const { count, error } = await supabase
+    .from("conversations")
+    .select("id", { head: true, count: "exact" });
+  console.log("[MEGHA][DB] conversations count:", { count, error, ms: Date.now() - t0 });
+} catch (e) {
+  console.log("[MEGHA][DB] fatal:", e?.message || e);
+}
+
 export const config = { runtime: 'edge' }; // keep Edge; works fine for now
 
 function errJSON(origin, status, msg) {
