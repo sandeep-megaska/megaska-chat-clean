@@ -2,7 +2,6 @@
   "version": 2,
   "routes": [
     { "src": "/api/ping", "dest": "/api/ping.js" },
-    { "src": "/api/hello", "dest": "/api/hello.js" },
     { "src": "/api/chat", "dest": "/api/chat.js" }
   ]
 }
