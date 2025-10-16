@@ -1,3 +1,7 @@
+// ==========================================
+// Megaska Chat — Website Crawler & Indexer
+// ==========================================
+
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import fetch from "node-fetch";
@@ -5,6 +9,7 @@ import { XMLParser } from "fast-xml-parser";
 import cheerio from "cheerio";
 import "dotenv/config";
 
+// --- CONFIG ---
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -19,6 +24,7 @@ const SITE =
 const MAX_URLS = 2000;
 const EMBEDDING_MODEL = "text-embedding-3-small";
 
+// --- HELPERS ---
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
