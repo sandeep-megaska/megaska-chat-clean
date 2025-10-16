@@ -65,11 +65,46 @@ async function embedBatch(texts) {
   return j.data.map(d => d.embedding);
 }
 
-async function parseSitemap(url) {
-  const r = await fetch(url, { redirect: 'follow' });
-  if (!r.ok) throw new Error(`sitemap fetch ${r.status} ${url}`);
-  const xml = await r.text();
-  return [...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map(m => m[1].trim());
+async function parseSitemapOrIndex(url, seen = new Set(), depth = 0) {
+  // Prevent loops
+  if (seen.has(url) || depth > 4) return [];
+  seen.add(url);
+
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok) throw new Error(`sitemap fetch ${res.status} ${url}`);
+  const xml = await res.text();
+
+  // Normalize whitespace
+  const body = xml.replace(/\s+/g, ' ');
+
+  // Is it a <sitemapindex>?
+  const isIndex = /<\s*sitemapindex\b/i.test(body);
+  // Capture <loc> and also namespaced <ns:loc>
+  const LOC_RE = /<\s*(?:[a-zA-Z0-9]+:)?loc\s*>\s*([^<]+?)\s*<\s*\/\s*(?:[a-zA-Z0-9]+:)?loc\s*>/gi;
+
+  const locs = [];
+  let m;
+  while ((m = LOC_RE.exec(body))) {
+    const loc = m[1].trim();
+    if (loc) locs.push(loc);
+  }
+
+  if (isIndex) {
+    // Recurse into each child sitemap
+    let urls = [];
+    for (const sm of locs) {
+      try {
+        const child = await parseSitemapOrIndex(sm, seen, depth + 1);
+        urls.push(...child);
+      } catch (e) {
+        console.log('[INGEST][sitemapindex] skip', sm, e.message || e);
+      }
+    }
+    return urls;
+  }
+
+  // It's a urlset → locs are page URLs
+  return locs;
 }
 
 async function upsertPage(url, title) {
@@ -118,16 +153,21 @@ export default async function handler(req) {
     const sitemaps = sitemapsParam.length ? sitemapsParam : DEFAULT_SITEMAPS;
 
     // Collect URLs
-    let urls = [];
-    for (const sm of sitemaps) {
-      try {
-        const list = await parseSitemap(sm);
-        urls.push(...list);
-      } catch (e) {
-        console.log('[INGEST][sitemap] skip', sm, e.message || e);
-      }
-    }
-    urls = Array.from(new Set(urls)).slice(0, limitParam);
+    // Collect URLs (handles sitemap indexes and urlsets)
+let urls = [];
+const perSitemapStats = [];
+for (const sm of sitemaps) {
+  try {
+    const list = await parseSitemapOrIndex(sm);
+    perSitemapStats.push({ sitemap: sm, found: list.length });
+    urls.push(...list);
+  } catch (e) {
+    console.log('[INGEST][sitemap] skip', sm, e.message || e);
+    perSitemapStats.push({ sitemap: sm, error: e.message || String(e) });
+  }
+}
+urls = Array.from(new Set(urls)).slice(0, limitParam);
+
 
     let pages = 0;
     let chunksTotal = 0;
@@ -165,7 +205,17 @@ export default async function handler(req) {
       }
     }
 
-    return J({ ok: true, pages, chunks: chunksTotal, ms: Date.now() - started, sitemaps, limit: limitParam });
+    return J({
+  ok: true,
+  pages,
+  chunks: chunksTotal,
+  ms: Date.now() - started,
+  sitemaps,
+  limit: limitParam,
+  discovered_urls: urls.length,
+  perSitemapStats
+});
+
 
   } catch (e) {
     // Return the error so you can see it in the browser
