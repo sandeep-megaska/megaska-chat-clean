@@ -1,4 +1,6 @@
 // api/chat.js
+// MEGHA RAG BUILD: health-rag-v1
+
 export const config = { runtime: 'edge' };
 
 import { createClient } from '@supabase/supabase-js';
