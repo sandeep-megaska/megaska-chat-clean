@@ -1,4 +1,4 @@
-// ESM handler for Vercel
+// api/ping.js
 export default async function handler(req, res) {
   const allowed = new Set((process.env.ALLOWED_ORIGINS || "")
     .split(",").map(s => s.trim()).filter(Boolean));
