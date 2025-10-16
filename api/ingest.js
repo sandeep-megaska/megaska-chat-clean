@@ -37,6 +37,19 @@ const sbHeaders = (jsonType = true) => {
   if (jsonType) h['Content-Type'] = 'application/json';
   return h;
 };
+// Allowlist patterns for quick mode (edit to taste)
+const QUICK_ALLOW = [
+  '/pages/', '/policies/', '/policy', '/faq', '/faqs',
+  '/size', 'size-chart', 'sizing', '/shipping', '/delivery', '/returns', '/exchange'
+];
+
+function quickFilterUrls(urls) {
+  const low = QUICK_ALLOW.map(s => s.toLowerCase());
+  return urls.filter(u => {
+    const lu = u.toLowerCase();
+    return low.some(s => lu.includes(s));
+  });
+}
 
 function tidyHtmlToText(html) {
   return html
