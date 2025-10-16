@@ -17,9 +17,7 @@ function cors(req) {
   };
 }
 
-export async function OPTIONS(req) {
-  return new Response(null, { status: 204, headers: cors(req) });
-}
+export async function OPTIONS(req) { return new Response(null, { status: 204, headers: cors(req) }); }
 
 export async function GET() {
   return new Response(JSON.stringify({ ok: true, route: '/api/chat', version: 'health-rag-v1', ts: Date.now() }), {
@@ -36,23 +34,23 @@ async function embed(text) {
   });
   if (!r.ok) throw new Error(`embed ${r.status}`);
   const j = await r.json();
-  return j.data[0].embedding; // length 1536
+  return j.data[0].embedding; // 1536-dim
 }
 
 export async function POST(req) {
   const headers = { 'Content-Type': 'application/json', ...cors(req) };
   try {
-    const { message, session } = await req.json();
+    const { message, sessionId, hints } = await req.json();
     if (!message || typeof message !== 'string') {
-      return new Response(JSON.stringify({ ok: false, error: "Missing 'message' string" }), { status: 400, headers });
+      return new Response(JSON.stringify({ ok:false, error:"Missing 'message' string" }), { status: 400, headers });
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    // 1) Embed the user query (must be 1536 dims)
+    // 1) Embed query
     const qemb = await embed(message);
 
-    // 2) Retrieve relevant chunks (tune threshold as needed)
+    // 2) Retrieve chunks (tune threshold if too strict)
     const { data: matches, error: rpcErr } = await supabase.rpc('match_web_chunks', {
       query_embedding: qemb,
       match_count: 8,
@@ -60,14 +58,11 @@ export async function POST(req) {
     });
     if (rpcErr) throw rpcErr;
 
-    // Dedupe by URL and keep the best few
+    // Dedupe by URL; keep a few best
     const seen = new Set();
     const top = [];
     for (const m of matches || []) {
-      if (!seen.has(m.url)) {
-        seen.add(m.url);
-        top.push(m);
-      }
+      if (!seen.has(m.url)) { seen.add(m.url); top.push(m); }
       if (top.length >= 5) break;
     }
 
@@ -76,8 +71,8 @@ export async function POST(req) {
       .join('\n\n---\n\n')
       .slice(0, 12000);
 
-    // 3) Ask OpenAI with context (conversion-friendly)
-    const sys = `You are MEGHA, Megaska's AI sales assistant. Use ONLY the CONTEXT for factual answers (policies, sizing, materials, shipping). Be concise, friendly, and add a subtle call-to-action if relevant. If the answer isn't in context, say you're not sure and ask a clarifying question.`;
+    // 3) Ask OpenAI with context
+    const sys = `You are MEGHA, Megaska's AI sales assistant. Use ONLY the CONTEXT for factual answers (policies, sizing, materials, shipping). Be concise, friendly, and add a subtle call-to-action when relevant. If it isn't in context, say you're not sure and ask a clarifying question.`;
     const user = `Customer question: ${message}
 
 CONTEXT:
@@ -92,17 +87,22 @@ ${context}`;
         temperature: 0.2
       })
     });
+    if (!r.ok) throw new Error(`openai ${r.status}`);
     const j = await r.json();
-    const reply = j.choices?.[0]?.message?.content || "Sorry, I couldn't find that in our site info yet.";
+    let reply = j.choices?.[0]?.message?.content?.trim();
 
-    // (Optional) Save turn
+    if (!reply) {
+      reply = "I couldn’t find that in our site info yet. Could you share a bit more detail?";
+    }
+
+    // 4) Optional: save turn (best-effort)
     try {
       const { data: conv } = await supabase.from('conversations').insert({
-        user_id: session?.customerId || null, title: null
+        user_id: null, title: null
       }).select('id').single();
       if (conv?.id) {
         await supabase.from('messages').insert([
-          { conversation_id: conv.id, role: 'user',      content: message },
+          { conversation_id: conv.id, role: 'user',      content: message, meta: hints || null },
           { conversation_id: conv.id, role: 'assistant', content: reply }
         ]);
       }
@@ -110,10 +110,10 @@ ${context}`;
       console.log('[MEGHA][save] warn:', e?.message || e);
     }
 
-    // Return a few sources for transparency
     const sources = top.slice(0, 3).map(s => ({ url: s.url, similarity: s.similarity }));
     return new Response(JSON.stringify({ ok: true, reply, sources }), { status: 200, headers });
+
   } catch (e) {
-    return new Response(JSON.stringify({ ok: false, error: e?.message || String(e) }), { status: 500, headers });
+    return new Response(JSON.stringify({ ok:false, error: e?.message || String(e) }), { status: 500, headers });
   }
 }
