@@ -254,6 +254,12 @@ discovered = Array.from(new Set(discovered)).slice(0, limit);
           await insertChunks(rows);
           chunks += rows.length;
         }
+        fetch('https://megaska-chat-clean.vercel.app/api/chat', {
+  method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body: JSON.stringify({ message: 'Do you have a size chart?' })
+}).then(r=>r.json()).then(console.log)
+
         pages += 1;
       } catch (e) {
         console.log('[INGEST][page] failed', p.url, e?.message || e);
