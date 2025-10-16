@@ -211,6 +211,11 @@ export default async function handler(req) {
         perSitemapStats
       });
     }
+const quick = url.searchParams.get('quick') === '1';
+if (quick) {
+  discovered = quickFilterUrls(discovered);
+}
+discovered = Array.from(new Set(discovered)).slice(0, limit);
 
     // 2) Fetch pages concurrently (bounded)
     const pageResults = await pmap(discovered, MAX_CONCURRENT, async (u) => {
