@@ -11,7 +11,6 @@ import fetch from "node-fetch";
 import { XMLParser } from "fast-xml-parser";
 import crypto from "crypto";
 import cheerio from "cheerio";
-import pLimit from "p-limit";
 import "dotenv/config";
 
 // -------------------------------
@@ -29,7 +28,7 @@ const SITE =
   "https://megaska.com/sitemap.xml";
 
 const MAX_URLS = parseInt(process.env.MAX_URLS || "2000", 10);
-const CONCURRENCY = 3; // safe default
+const CONCURRENCY = 3; // how many pages crawl at once
 const EMBEDDING_MODEL = "text-embedding-3-small";
 
 // -------------------------------
@@ -70,7 +69,6 @@ async function getSitemapUrls(url) {
 
   let urls = [];
 
-  // Detect sitemap index or urlset
   if (parsed.sitemapindex && parsed.sitemapindex.sitemap) {
     const sitemaps = Array.isArray(parsed.sitemapindex.sitemap)
       ? parsed.sitemapindex.sitemap
@@ -117,7 +115,6 @@ async function upsertChunks(url, chunks, embeddings) {
     embedding: embeddings[i],
   }));
 
-  // Delete old, insert new
   await supabase.from("web_chunks").delete().eq("url", url);
   await supabase.from("web_chunks").insert(rows);
 }
@@ -143,29 +140,15 @@ async function crawlOne(url, index, total) {
     await upsertChunks(url, chunks, embeddings);
 
     console.log(`[${index + 1}/${total}] Indexed: ${url} (${chunks.length} chunks)`);
-    await sleep(250);
+    await sleep(200);
   } catch (err) {
     console.error(`[${index + 1}/${total}] Failed ${url}: ${err.message}`);
   }
 }
 
 // -------------------------------
-//  MAIN RUNNER
+//  SIMPLE CONCURRENCY POOL
 // -------------------------------
-async function run() {
-  console.log(`Crawling: ${SITE}`);
-  const urls = await getSitemapUrls(SITE);
-  console.log(`Total URLs: ${urls.length}`);
-
-  const limit = pLimit(CONCURRENCY);
-  const tasks = urls.map((url, i) => limit(() => crawlOne(url, i, urls.length)));
-
-  await Promise.all(tasks);
-  console.log("✅ Crawl completed successfully!");
-}
-
-// -------------------------------
-run().catch((e) => {
-  console.error("Fatal error:", e);
-  process.exit(1);
-});
+async function asyncPool(limit, array, iteratorFn) {
+  const ret = [];
+  const execut
