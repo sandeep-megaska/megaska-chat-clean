@@ -141,7 +141,17 @@ export async function POST(req) {
     const qemb = await embed(message);
 
     // 2) Retrieve chunks via RPC
-    const matches = await sbMatchChunks(qemb, 8, 0.68);
+    // replace your current sbMatchChunks call with this snippet:
+let matches = await sbMatchChunks(qemb, 10, 0.68);
+
+// If sparse, try a lower threshold automatically
+if (!matches || matches.length < 2) {
+  matches = await sbMatchChunks(qemb, 12, 0.62);
+}
+if (!matches || matches.length === 0) {
+  matches = await sbMatchChunks(qemb, 15, 0.58);
+}
+
 
     // Dedupe best by URL
     const seen = new Set();
