@@ -1,66 +1,171 @@
-// =========================
-// Megaska Chat Crawler v2
-// =========================
-// Sequential, stable, and works with Supabase + OpenAI Embeddings
-// Usage: npm.cmd run crawl:index -- "https://megaska.com/sitemap.xml"
+// ==========================================
+// Megaska Chat — Website Crawler & Indexer
+// ==========================================
+// Usage:
+//   npm run crawl:index -- "https://megaska.com/sitemap.xml"
+// ------------------------------------------
 
-import fetch from "node-fetch";
-import cheerio from "cheerio";
+import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
-import { getPool } from "../lib/db.js";
+import fetch from "node-fetch";
+import { XMLParser } from "fast-xml-parser";
+import crypto from "crypto";
+import cheerio from "cheerio";
+import pLimit from "p-limit";
 import "dotenv/config";
 
-
-// --- CONFIG ---
+// -------------------------------
+//  CONFIGURATION
+// -------------------------------
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+
+const SITE =
+  process.argv.find((a) => a.startsWith("http")) ||
+  process.env.SITEMAP_URL ||
+  "https://megaska.com/sitemap.xml";
+
 const MAX_URLS = parseInt(process.env.MAX_URLS || "2000", 10);
-const SITEMAP_URL =
-  process.argv[2] && process.argv[2].startsWith("http")
-    ? process.argv[2]
-    : "https://megaska.com/sitemap.xml";
+const CONCURRENCY = 3; // safe default
+const EMBEDDING_MODEL = "text-embedding-3-small";
 
-// --- HELPERS ---
+// -------------------------------
+//  UTILITIES
+// -------------------------------
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
 
-async function fetchText(url) {
-  const res = await fetch(url, { redirect: "follow" });
-  if (!res.ok) throw new Error(`Fetch failed: ${res.status} ${url}`);
-  return res.text();
-}
-
-function isSitemapIndex(xml) {
-  return /<sitemapindex/i.test(xml);
-}
-
-function extractXmlTagList(xml, tag) {
-  const regex = new RegExp(`<${tag}>(.*?)</${tag}>`, "gis");
-  const out = [];
-  let match;
-  while ((match = regex.exec(xml))) {
-    out.push(match[1].trim());
+function chunkText(text, maxLen = 1200, overlap = 150) {
+  const chunks = [];
+  let i = 0;
+  while (i < text.length) {
+    const end = Math.min(text.length, i + maxLen);
+    chunks.push(text.slice(i, end));
+    i = end - overlap;
   }
-  return out;
+  return chunks.filter((c) => c.trim().length > 0);
 }
 
-async function getSitemapUrls(sitemapUrl) {
-  const xml = await fetchText(sitemapUrl);
+function cleanHtml(html) {
+  const $ = cheerio.load(html);
+  $("script, style, noscript").remove();
+  const title = $("title").text().trim();
+  const text = $("body").text().replace(/\s+/g, " ").trim();
+  return { title, text };
+}
+
+// -------------------------------
+//  FETCH & PARSE SITEMAP
+// -------------------------------
+async function getSitemapUrls(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch sitemap: ${url}`);
+  const xml = await res.text();
+  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "" });
+  const parsed = parser.parse(xml);
+
   let urls = [];
 
-  if (isSitemapIndex(xml)) {
-    const sitemaps = extractXmlTagList(xml, "loc");
+  // Detect sitemap index or urlset
+  if (parsed.sitemapindex && parsed.sitemapindex.sitemap) {
+    const sitemaps = Array.isArray(parsed.sitemapindex.sitemap)
+      ? parsed.sitemapindex.sitemap
+      : [parsed.sitemapindex.sitemap];
     for (const sm of sitemaps) {
-      try {
-        const xml2 = await fetchText(sm);
-        urls.push(...extractXmlTagList(xml2, "loc"));
-        await sleep(100);
-      } catch (e) {
-        console.warn(`Failed child sitemap ${sm}: ${e.message}`);
+      if (sm.loc) {
+        const childUrls = await getSitemapUrls(sm.loc);
+        urls.push(...childUrls);
       }
     }
-  } else {
-    urls = extractXmlTagList(xml, "loc");
+  } else if (parsed.urlset && parsed.urlset.url) {
+    const items = Array.isArray(parsed.urlset.url)
+      ? parsed.urlset.url
+      : [parsed.urlset.url];
+    urls = items.map((u) => u.loc).filter(Boolean);
   }
 
-  return Array.from(new Set(urls)).slice(0,
+  return Array.from(new Set(urls)).slice(0, MAX_URLS);
+}
+
+// -------------------------------
+//  EMBEDDING + UPSERT
+// -------------------------------
+async function embedBatch(strings) {
+  if (!strings.length) return [];
+  const resp = await openai.embeddings.create({
+    model: EMBEDDING_MODEL,
+    input: strings,
+  });
+  return resp.data.map((d) => d.embedding);
+}
+
+async function upsertPage(url, title, status) {
+  await supabase
+    .from("web_pages")
+    .upsert({ url, title, status, fetched_at: new Date().toISOString() });
+}
+
+async function upsertChunks(url, chunks, embeddings) {
+  const rows = chunks.map((content, i) => ({
+    url,
+    chunk_index: i,
+    content,
+    embedding: embeddings[i],
+  }));
+
+  // Delete old, insert new
+  await supabase.from("web_chunks").delete().eq("url", url);
+  await supabase.from("web_chunks").insert(rows);
+}
+
+// -------------------------------
+//  CRAWL ONE PAGE
+// -------------------------------
+async function crawlOne(url, index, total) {
+  try {
+    const res = await fetch(url);
+    const html = await res.text();
+    const { title, text } = cleanHtml(html);
+
+    if (!text || text.length < 50) {
+      console.log(`[${index + 1}/${total}] Skipped (too short): ${url}`);
+      return;
+    }
+
+    const chunks = chunkText(text);
+    const embeddings = await embedBatch(chunks);
+
+    await upsertPage(url, title, res.status);
+    await upsertChunks(url, chunks, embeddings);
+
+    console.log(`[${index + 1}/${total}] Indexed: ${url} (${chunks.length} chunks)`);
+    await sleep(250);
+  } catch (err) {
+    console.error(`[${index + 1}/${total}] Failed ${url}: ${err.message}`);
+  }
+}
+
+// -------------------------------
+//  MAIN RUNNER
+// -------------------------------
+async function run() {
+  console.log(`Crawling: ${SITE}`);
+  const urls = await getSitemapUrls(SITE);
+  console.log(`Total URLs: ${urls.length}`);
+
+  const limit = pLimit(CONCURRENCY);
+  const tasks = urls.map((url, i) => limit(() => crawlOne(url, i, urls.length)));
+
+  await Promise.all(tasks);
+  console.log("✅ Crawl completed successfully!");
+}
+
+// -------------------------------
+run().catch((e) => {
+  console.error("Fatal error:", e);
+  process.exit(1);
+});
