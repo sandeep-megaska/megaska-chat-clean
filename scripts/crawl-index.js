@@ -1,6 +1,7 @@
-// robust import for all Node / p-limit versions
-import * as pLimitModule from "p-limit";
-const pLimit = pLimitModule.default || pLimitModule.pLimit || pLimitModule;
+import("p-limit").then(mod => {
+  global.pLimit = mod.default || mod.pLimit || mod;
+});
+
 
 
 import fetch from "node-fetch";
