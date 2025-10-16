@@ -1,5 +1,7 @@
-import * as pLimitPkg from "p-limit";
-const pLimit = pLimitPkg.default || pLimitPkg.pLimit || pLimitPkg;
+// robust import for all Node / p-limit versions
+import * as pLimitModule from "p-limit";
+const pLimit = pLimitModule.default || pLimitModule.pLimit || pLimitModule;
+
 
 import fetch from "node-fetch";
 import cheerio from "cheerio";
