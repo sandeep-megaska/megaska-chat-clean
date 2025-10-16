@@ -24,23 +24,32 @@ export default function handler(req, res) {
   }
 
   // --- Simple POST (no streaming yet) ---
-  if (req.method === "POST") {
-    let bodyText = "";
-    req.on("data", (chunk) => (bodyText += chunk));
-    req.on("end", () => {
-      let body;
-      try { body = JSON.parse(bodyText || "{}"); } catch { body = {}; }
-      const message = (body?.message || "").toString();
-      return res
-        .status(200)
-        .json({ ok: true, echo: message, version: "health-json-v3" });
-    });
-    req.on("error", (e) => {
-      console.error("READ_BODY_ERROR", e);
-      return res.status(400).json({ ok: false, error: "Bad body" });
-    });
-    return;
-  }
+  // replace your current POST handler with this:
+if (req.method === "POST") {
+  // SSE headers
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+
+  let bodyText = "";
+  req.on("data", (chunk) => (bodyText += chunk));
+  req.on("end", () => {
+    let body;
+    try { body = JSON.parse(bodyText || "{}"); } catch { body = {}; }
+    const message = (body?.message || "").toString();
+
+    res.write(`data: ${JSON.stringify({ output_text: "Hi! Megha is online. " })}\n\n`);
+    res.write(`data: ${JSON.stringify({ output_text: "You said: " + message })}\n\n`);
+    res.write(`data: ${JSON.stringify({ done: true, version: "sse-v1" })}\n\n`);
+    res.end();
+  });
+  req.on("error", (e) => {
+    console.error("READ_BODY_ERROR", e);
+    res.write(`event: error\ndata: ${JSON.stringify({ error: "Bad body" })}\n\n`);
+    res.end();
+  });
+  return;
+}
 
   return res.status(405).json({ error: "Method Not Allowed" });
 }
