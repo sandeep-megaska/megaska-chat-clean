@@ -79,3 +79,8 @@ export default async function handler(req){
     return J({ ok:false, error:e?.message || String(e) }, 500);
   }
 }
+fetch('https://megaska-chat-clean.vercel.app/api/chat', {
+  method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body: JSON.stringify({ message: 'Do you have a size chart?' })
+}).then(r=>r.json()).then(console.log)
