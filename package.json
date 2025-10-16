@@ -1,8 +1,21 @@
-﻿{
-  "name": "megaska-chat-clean",
+cd "C:\Users\sande\Documents\megaska-chat"
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[IO.File]::WriteAllText("package.json", @"
+{
+  "name": "megaska-chat",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
-  "scripts": { "dev": "vercel dev", "build": "echo \"No build step needed\"", "start": "vercel dev" },
-  "dependencies": {}
+  "engines": { "node": "18.x" },
+  "scripts": {
+    "crawl:index": "node scripts/crawl-index.js --site=https://megaska.com/sitemap.xml --max=2000"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "fast-xml-parser": "^4.4.1",
+    "jsdom": "^24.1.0",
+    "node-fetch": "2.6.12",
+    "openai": "^4.58.1",
+    "p-limit": "^6.1.0"
+  }
 }
+"@, $utf8NoBom)
