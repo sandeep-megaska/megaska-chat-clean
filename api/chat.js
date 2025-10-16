@@ -25,6 +25,19 @@ function cors(req) {
 }
 export async function OPTIONS(req) { return new Response(null, { status: 204, headers: cors(req) }); }
 export async function GET() {
+
+  export async function GET() {
+  return new Response(JSON.stringify({
+    ok: true,
+    route: '/api/chat',
+    version: 'health-rag-v2',
+    hasUrl: !!process.env.SUPABASE_URL,
+    hasService: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    hasAnon: !!process.env.SUPABASE_ANON_KEY,
+    ts: Date.now()
+  }), { status: 200, headers: { 'Content-Type': 'application/json' }});
+}
+
   return new Response(JSON.stringify({ ok: true, route: '/api/chat', version: 'health-rag-v2', ts: Date.now() }), {
     status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
