@@ -137,3 +137,28 @@ async function crawl(sitemapUrl) {
 
 const sitemapArg = process.argv[2] || "https://megaska.com/sitemap.xml";
 crawl(sitemapArg).catch(e => { console.error(e); process.exit(1); });
+// Wait until the dynamic import above has finished loading pLimit
+async function runWithLimit() {
+  const limitFn = typeof global.pLimit === "function"
+    ? global.pLimit
+    : (global.pLimit?.default || global.pLimit?.pLimit);
+
+  if (typeof limitFn !== "function") {
+    throw new Error("pLimit failed to load correctly");
+  }
+
+  const limit = limitFn(3);
+  console.log(`Total URLs: ${urls.length}`);
+
+  await Promise.all(
+    urls.map((url, i) =>
+      limit(async () => {
+        await crawlOne(url);
+        console.log(`[${i + 1}/${urls.length}] Indexed: ${url}`);
+      })
+    )
+  );
+}
+
+await runWithLimit();
+
