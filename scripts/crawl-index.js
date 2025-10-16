@@ -8,6 +8,8 @@ import fetch from "node-fetch";
 import cheerio from "cheerio";
 import OpenAI from "openai";
 import { getPool } from "../lib/db.js";
+import "dotenv/config";
+
 
 // --- CONFIG ---
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
