@@ -1,4 +1,11 @@
 // api/chat.js
+// TEMP: log to Vercel server logs on each POST
+console.log('[MEGHA][env]', {
+  hasUrl: !!process.env.SUPABASE_URL,
+  hasService: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+  hasAnon: !!process.env.SUPABASE_ANON_KEY
+});
+
 // EDGE-SAFE: no supabase-js import; uses PostgREST/RPC via fetch
 export const config = { runtime: 'edge' };
 
