@@ -141,10 +141,7 @@ async function runWithLimit() {
     throw new Error("pLimit failed to load correctly");
   }
 
-  const limit = limitFn(3);
   console.log(`Total URLs: ${urls.length}`);
-
- console.log(`Total URLs: ${urls.length}`);
 
 for (let i = 0; i < urls.length; i++) {
   const url = urls[i];
@@ -155,6 +152,4 @@ for (let i = 0; i < urls.length; i++) {
     console.error(`Failed [${i + 1}/${urls.length}] ${url}:`, err.message);
   }
 }
-
-await runWithLimit();
 
