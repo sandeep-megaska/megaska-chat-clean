@@ -1,11 +1,8 @@
 {
   "version": 2,
-  "functions": {
-    "api/**/*.js": { "runtime": "nodejs18.x" }
-  },
   "routes": [
     { "src": "/api/ping", "dest": "/api/ping.js" },
-    { "src": "/api/chat", "dest": "/api/chat.js" },
-    { "src": "/api/search", "dest": "/api/search.js" }
+    { "src": "/api/hello", "dest": "/api/hello.js" },
+    { "src": "/api/chat", "dest": "/api/chat.js" }
   ]
 }
