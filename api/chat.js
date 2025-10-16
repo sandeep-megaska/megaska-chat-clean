@@ -1,14 +1,12 @@
 // api/chat.js
-// MEGHA RAG BUILD: health-rag-v1
-
+// EDGE-SAFE: no supabase-js import; uses PostgREST/RPC via fetch
 export const config = { runtime: 'edge' };
-
-import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const OPENAI_KEY   = process.env.OPENAI_API_KEY;
 
+// ---- CORS helpers ----
 function cors(req) {
   const origin = req.headers.get('Origin') || '*';
   return {
@@ -18,16 +16,14 @@ function cors(req) {
     'Vary': 'Origin'
   };
 }
-
 export async function OPTIONS(req) { return new Response(null, { status: 204, headers: cors(req) }); }
-
 export async function GET() {
-  return new Response(JSON.stringify({ ok: true, route: '/api/chat', version: 'health-rag-v1', ts: Date.now() }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  return new Response(JSON.stringify({ ok: true, route: '/api/chat', version: 'health-rag-v2', ts: Date.now() }), {
+    status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
 }
 
+// ---- OpenAI embedding ----
 async function embed(text) {
   const r = await fetch('https://api.openai.com/v1/embeddings', {
     method: 'POST',
@@ -39,28 +35,66 @@ async function embed(text) {
   return j.data[0].embedding; // 1536-dim
 }
 
+// ---- Supabase REST helpers (Edge-compatible) ----
+function sbHeaders(json = true) {
+  const h = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
+  if (json) h['Content-Type'] = 'application/json';
+  return h;
+}
+
+// RPC: match_web_chunks
+async function sbMatchChunks(queryEmbedding, count = 8, thresh = 0.68) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_web_chunks`, {
+    method: 'POST',
+    headers: sbHeaders(),
+    body: JSON.stringify({
+      query_embedding: queryEmbedding,
+      match_count: count,
+      similarity_threshold: thresh
+    })
+  });
+  if (!r.ok) throw new Error(`rpc match_web_chunks ${r.status}`);
+  return r.json(); // array
+}
+
+// Insert conversation -> return id
+async function sbCreateConversation(user_id = null, title = null) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/conversations`, {
+    method: 'POST',
+    headers: { ...sbHeaders(), Prefer: 'return=representation' },
+    body: JSON.stringify([{ user_id, title }])
+  });
+  if (!r.ok) throw new Error(`insert conversations ${r.status}`);
+  const rows = await r.json();
+  return rows?.[0]?.id || null;
+}
+
+// Insert messages (batch)
+async function sbInsertMessages(rows) {
+  if (!rows?.length) return;
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/messages`, {
+    method: 'POST',
+    headers: sbHeaders(),
+    body: JSON.stringify(rows)
+  });
+  if (!r.ok) throw new Error(`insert messages ${r.status}`);
+}
+
 export async function POST(req) {
   const headers = { 'Content-Type': 'application/json', ...cors(req) };
   try {
-    const { message, sessionId, hints } = await req.json();
+    const { message, session } = await req.json();
     if (!message || typeof message !== 'string') {
       return new Response(JSON.stringify({ ok:false, error:"Missing 'message' string" }), { status: 400, headers });
     }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
     // 1) Embed query
     const qemb = await embed(message);
 
-    // 2) Retrieve chunks (tune threshold if too strict)
-    const { data: matches, error: rpcErr } = await supabase.rpc('match_web_chunks', {
-      query_embedding: qemb,
-      match_count: 8,
-      similarity_threshold: 0.68
-    });
-    if (rpcErr) throw rpcErr;
+    // 2) Retrieve chunks via RPC
+    const matches = await sbMatchChunks(qemb, 8, 0.68);
 
-    // Dedupe by URL; keep a few best
+    // Dedupe best by URL
     const seen = new Set();
     const top = [];
     for (const m of matches || []) {
@@ -91,28 +125,23 @@ ${context}`;
     });
     if (!r.ok) throw new Error(`openai ${r.status}`);
     const j = await r.json();
-    let reply = j.choices?.[0]?.message?.content?.trim();
+    const reply = j.choices?.[0]?.message?.content?.trim()
+      || "I couldn’t find that in our site info yet. Could you share a bit more detail?";
 
-    if (!reply) {
-      reply = "I couldn’t find that in our site info yet. Could you share a bit more detail?";
-    }
-
-    // 4) Optional: save turn (best-effort)
+    // 4) Save turn (best-effort; ignore errors)
     try {
-      const { data: conv } = await supabase.from('conversations').insert({
-        user_id: null, title: null
-      }).select('id').single();
-      if (conv?.id) {
-        await supabase.from('messages').insert([
-          { conversation_id: conv.id, role: 'user',      content: message, meta: hints || null },
-          { conversation_id: conv.id, role: 'assistant', content: reply }
+      const convId = await sbCreateConversation(session?.customerId || null, null);
+      if (convId) {
+        await sbInsertMessages([
+          { conversation_id: convId, role: 'user',      content: message, meta: null },
+          { conversation_id: convId, role: 'assistant', content: reply,   meta: null }
         ]);
       }
     } catch (e) {
       console.log('[MEGHA][save] warn:', e?.message || e);
     }
 
-    const sources = top.slice(0, 3).map(s => ({ url: s.url, similarity: s.similarity }));
+    const sources = top.slice(0,3).map(s => ({ url: s.url, similarity: s.similarity }));
     return new Response(JSON.stringify({ ok: true, reply, sources }), { status: 200, headers });
 
   } catch (e) {
