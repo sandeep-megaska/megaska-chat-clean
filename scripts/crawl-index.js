@@ -1,9 +1,3 @@
-import("p-limit").then(mod => {
-  global.pLimit = mod.default || mod.pLimit || mod;
-});
-
-
-
 import fetch from "node-fetch";
 import cheerio from "cheerio";
 import OpenAI from "openai";
@@ -150,14 +144,16 @@ async function runWithLimit() {
   const limit = limitFn(3);
   console.log(`Total URLs: ${urls.length}`);
 
-  await Promise.all(
-    urls.map((url, i) =>
-      limit(async () => {
-        await crawlOne(url);
-        console.log(`[${i + 1}/${urls.length}] Indexed: ${url}`);
-      })
-    )
-  );
+ console.log(`Total URLs: ${urls.length}`);
+
+for (let i = 0; i < urls.length; i++) {
+  const url = urls[i];
+  try {
+    await crawlOne(url);
+    console.log(`[${i + 1}/${urls.length}] Indexed: ${url}`);
+  } catch (err) {
+    console.error(`Failed [${i + 1}/${urls.length}] ${url}:`, err.message);
+  }
 }
 
 await runWithLimit();
