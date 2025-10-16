@@ -12,6 +12,35 @@ export const config = { runtime: 'edge' };
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const OPENAI_KEY   = process.env.OPENAI_API_KEY;
+function sbHeaders(json = true) {
+  const h = {
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+    'Accept-Profile': 'public',     // <— important
+    'Content-Profile': 'public'     // <— important
+  };
+  if (json) h['Content-Type'] = 'application/json';
+  return h;
+}
+
+// RPC: match_web_chunks
+async function sbMatchChunks(queryEmbedding, count = 8, thresh = 0.68) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_web_chunks`, {
+    method: 'POST',
+    headers: sbHeaders(),
+    body: JSON.stringify({
+      query_embedding: queryEmbedding,      // names must match function args
+      match_count: count,
+      similarity_threshold: thresh
+    })
+  });
+
+  if (!r.ok) {
+    const txt = await r.text().catch(()=>'');
+    throw new Error(`rpc match_web_chunks ${r.status} ${txt.slice(0,200)}`);
+  }
+  return r.json();
+}
 
 // ---- CORS helpers ----
 function cors(req) {
