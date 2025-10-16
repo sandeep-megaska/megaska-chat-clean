@@ -1,17 +1,19 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Megaska Chat Test</title>
+<title>Megha v1.1 — Chat Test</title>
 <style>
-body { font-family: sans-serif; max-width: 600px; margin: 3rem auto; }
-textarea { width: 100%; height: 100px; }
-#out { white-space: pre-wrap; margin-top: 1rem; border: 1px solid #ddd; padding: 1rem; }
+body{font-family:system-ui,Arial,sans-serif;max-width:720px;margin:40px auto;padding:0 16px}
+textarea{width:100%;height:110px}
+#out{white-space:pre-wrap;border:1px solid #ddd;padding:12px;margin-top:12px;min-height:120px}
+small{color:#666}
 </style>
 </head>
 <body>
-<h1>Megaska Chat Test</h1>
-<textarea id="input" placeholder="Ask something..."></textarea><br>
+<h1>Megha v1.1 — Chat Test</h1>
+<p><small>Type a question like “What’s your exchange policy?” or “Search products: burkini”.</small></p>
+<textarea id="inp" placeholder="Ask anything…"></textarea><br/>
 <button id="send">Send</button>
 <div id="out"></div>
 <script>
@@ -19,11 +21,12 @@ const sendBtn = document.getElementById('send');
 const out = document.getElementById('out');
 sendBtn.onclick = async () => {
   out.textContent = '';
-  const userText = document.getElementById('input').value;
+  const userText = document.getElementById('inp').value.trim();
+  if (!userText) return;
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ messages: [{ role: 'user', content: userText }] })
+    body: JSON.stringify({ messages: [{ role: 'user', content: userText }], temperature: 0.4 })
   });
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
