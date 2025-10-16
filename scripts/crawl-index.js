@@ -1,4 +1,6 @@
-import pLimit from "p-limit";
+import * as pLimitPkg from "p-limit";
+const pLimit = pLimitPkg.default || pLimitPkg.pLimit || pLimitPkg;
+
 import fetch from "node-fetch";
 import cheerio from "cheerio";
 import OpenAI from "openai";
