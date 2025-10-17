@@ -1,5 +1,43 @@
 // /api/chat.js — MEGASKA Smart Fast Path (Edge, brand-grounded)
 export const config = { runtime: 'edge' };
+async function shopifySearchProducts(query, limit = 6) {
+  const endpoint = `https://${process.env.SHOPIFY_STORE_DOMAIN}/api/2024-10/graphql.json`;
+  const r = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'X-Shopify-Storefront-Access-Token': process.env.SHOPIFY_STOREFRONT_TOKEN,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      query: `
+        query($q:String!, $n:Int!) {
+          products(first:$n, query:$q) {
+            edges { node { handle title onlineStoreUrl } }
+          }
+          collections(first:$n, query:$q) {
+            edges { node { handle title } }
+          }
+        }`,
+      variables: { q: query, n: limit }
+    })
+  });
+
+  if (!r.ok) {
+    console.error('shopifySearchProducts HTTP', r.status);
+    return [];
+  }
+
+  const j = await r.json().catch(() => ({}));
+  const products = (j.data?.products?.edges || []).map(({ node }) => ({
+    title: node.title,
+    url: node.onlineStoreUrl || `https://megaska.com/products/${node.handle}`
+  }));
+  const collections = (j.data?.collections?.edges || []).map(({ node }) => ({
+    title: node.title,
+    url: `https://megaska.com/collections/${node.handle}`
+  }));
+  return [...products, ...collections].slice(0, limit);
+}
 
 /* ----------------------- ENV ----------------------- */
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -445,18 +483,35 @@ Need help picking a style (full-length Islamic, knee-length, dress type, tops/bo
     // 5) Product/Collection quick links + external links (Amazon/Myntra) when relevant
     let linkBlock = '';
 try {
-  if (/(show|find|see|price|cost|buy|link|product|collection|burkini|dress|rash|one[- ]?piece|swim)/i.test(message)) {
-    let hits = await shopifySearchProducts(message, 4);
-    if (!hits.length) hits = await findProductsAndCollections(message, 4); // fallback to your indexed pages
+  // stronger trigger: product-y or style phrases
+  const wantsLinks = /(show|find|see|price|cost|buy|link|product|collection|swim|swimwear|burkini|dress|rash|one[- ]?piece|top|bottom|knee|full[- ]?length)/i.test(message);
+  // never attach links if we’re in sizing WITH measurements (you already early-return in that branch)
+  if (wantsLinks && i !== 'sizing') {
+    let hits = [];
+    // 1) Shopify live search
+    try {
+      hits = await shopifySearchProducts(message, 6);
+    } catch (e) {
+      console.error('shopifySearchProducts error', e);
+    }
+    // 2) Fallback to your Supabase page index if Shopify returns nothing
+    if (!hits.length) {
+      hits = await findProductsAndCollections(message, 6);
+    }
     if (hits.length) {
       linkBlock += '\n\n**Quick links:**\n' + hits.map(h => `- [${h.title || 'View'}](${h.url})`).join('\n');
     }
-    const exts = await extLinks(message, 3);
-    if (exts.length) {
-      linkBlock += '\n\n**Also available on:**\n' + exts.map(e => `- ${e.store}: [${e.label}](${e.url})`).join('\n');
-    }
+    // 3) Optional marketplaces
+    try {
+      const exts = await extLinks(message, 3);
+      if (exts.length) {
+        linkBlock += '\n\n**Also available on:**\n' + exts.map(e => `- ${e.store}: [${e.label}](${e.url})`).join('\n');
+      }
+    } catch {}
   }
-} catch {}
+} catch (e) {
+  console.error('linkBlock error', e);
+}
 
     // 6) Final polish (owner voice)
     const reply = await polish(message, `${base}${extra}${linkBlock}`.trim());
