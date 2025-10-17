@@ -2,8 +2,46 @@
 export const config = { runtime: 'edge' };
 
 // ---- Shopify live search (keep ONLY one copy of this) ----
-async function shopifySearchProducts(query, limit = 6) {
+// ---- Shopify live search (single definition only) ----
+async function shopifySearchProducts(userText, limit = 6) {
   const endpoint = `https://${process.env.SHOPIFY_STORE_DOMAIN}/api/2024-10/graphql.json`;
+
+  // 1) Normalize the query (strip filler words, keep product-y tokens)
+  const text = String(userText || '').toLowerCase();
+  const tokens = text
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  // Keep meaningful tokens only
+  const KEEP = new Set([
+    'knee','length','knee-length','kneelength',
+    'swim','swimwear','dress','one','piece','one-piece','onepiece',
+    'burkini','rash','guard','top','bottom','modest','islamic','full','coverage'
+  ]);
+  const terms = tokens.filter(t => KEEP.has(t)) ;
+
+  // Add a couple of phrase guesses
+  const phrases = [];
+  if (text.includes('knee') && text.includes('length')) phrases.push('"knee length"');
+  if (text.includes('one') && text.includes('piece')) phrases.push('"one piece"');
+  if (text.includes('rash') && text.includes('guard')) phrases.push('"rash guard"');
+  if (text.includes('full') && text.includes('length')) phrases.push('"full length"');
+  if (text.includes('islamic')) phrases.push('islamic');
+
+  // 2) Build Shopify query
+  // Try titles first, then tags, then broad product_type
+  const unique = Array.from(new Set([...terms]));
+  const titleParts = unique.map(t => `title:*${t}*`);
+  const tagParts   = unique.map(t => `tag:${t}`);
+  const phraseParts= phrases.map(p => `title:${p}`);
+
+  let q = [...phraseParts, ...titleParts, ...tagParts, `product_type:swimwear`]
+    .filter(Boolean)
+    .join(' OR ');
+  if (!q) q = 'product_type:swimwear'; // last resort
+
+  // 3) Call Storefront API
   const r = await fetch(endpoint, {
     method: 'POST',
     headers: {
@@ -20,11 +58,15 @@ async function shopifySearchProducts(query, limit = 6) {
             edges { node { handle title } }
           }
         }`,
-      variables: { q: query, n: limit }
+      variables: { q, n: limit }
     })
   });
+
   if (!r.ok) return [];
+
   const j = await r.json().catch(() => ({}));
+
+  // 4) Shape results
   const products = (j.data?.products?.edges || []).map(({ node }) => ({
     title: node.title,
     url: node.onlineStoreUrl || `https://megaska.com/products/${node.handle}`
@@ -33,7 +75,16 @@ async function shopifySearchProducts(query, limit = 6) {
     title: node.title,
     url: `https://megaska.com/collections/${node.handle}`
   }));
-  return [...products, ...collections].slice(0, limit);
+
+  // 5) Final fallback: if nothing, point to on-site search for the phrase
+  const hits = [...products, ...collections];
+  if (!hits.length) {
+    return [{
+      title: 'Search results on MEGASKA',
+      url: `https://megaska.com/search?q=${encodeURIComponent(userText)}`
+    }];
+  }
+  return hits.slice(0, limit);
 }
 
 /* ----------------------- ENV ----------------------- */
