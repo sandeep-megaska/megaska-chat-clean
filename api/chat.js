@@ -335,10 +335,22 @@ export default async function handler(req) {
   if (req.method !== 'POST')    return json({ ok: false, error: 'Method not allowed' }, 405, h);
 
   try {
-    const { message } = await req.json().catch(() => ({}));
-    if (!message || typeof message !== 'string') {
-      return json({ ok: false, error: "Missing 'message' string" }, 400, h);
-    }
+    // Inside /api/chat.js, POST branch:
+const body = await req.json().catch(() => ({}));
+
+// Accept BOTH {message: "..."} and {messages:[{role,content}, ...]}
+let message = body?.message;
+if (!message && Array.isArray(body?.messages)) {
+  // combine assistant/user contents; prefer latest user
+  const lastUser = [...body.messages].reverse().find(m => m?.role === 'user');
+  message = lastUser?.content || body.messages.map(m => m?.content || '').join('\n').trim();
+}
+
+// final validation
+if (!message || typeof message !== 'string' || !message.trim()) {
+  return json({ ok: false, error: "Missing 'message' string or empty content" }, 400, h);
+}
+
 
     // 1) Intent
     const i = intent(message);
