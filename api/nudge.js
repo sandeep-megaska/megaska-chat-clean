@@ -31,3 +31,9 @@ export default async function handler(req, res) {
 
   res.status(200).json({ nudge });
 }
+// after you compute events in nudge endpoint
+const askedSize = (events||[]).some(e => e.event === 'chat_message' && /size|sizing|fit|measure/i.test(e.text||''));
+if (askedSize && idle) {
+  nudge = { type:'prompt', text: "Unsure about size? Share bust/waist/hip in cm—I'll suggest the best fit." };
+}
+
