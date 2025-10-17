@@ -158,6 +158,7 @@ function recommendSizeFromChart(chart, { bust, waist, hip }) {
   // score by how many measures fall inside a size range; tie-break by smallest upsizing
   const scored = chart.map(row => {
     let inside = 0, upsizes = 0;
+    if (bust > 60) { bust *= 0.3937; waist *= 0.3937; hip *= 0.3937; }
     if (bust) { if (bust >= row.bust_min && bust <= row.bust_max) inside++; else if (bust > row.bust_max) upsizes++; }
     if (waist){ if (waist>= row.waist_min&& waist<= row.waist_max) inside++; else if (waist> row.waist_max) upsizes++; }
     if (hip)  { if (hip  >= row.hip_min  && hip  <= row.hip_max ) inside++; else if (hip  > row.hip_max ) upsizes++; }
