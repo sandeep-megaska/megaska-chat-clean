@@ -4,6 +4,43 @@ export const config = { runtime: 'edge' };
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const OPENAI_KEY   = process.env.OPENAI_API_KEY;
+async function findProductsAndCollections(q, limit = 4) {
+  const base = `${SUPABASE_URL}/rest/v1/web_pages`;
+  const sel  = 'url,title';
+  const like = encodeURIComponent(`*${q}*`);
+  const u = new URL(base);
+  u.searchParams.set('select', sel);
+  // match on title/url, then filter to products/collections
+  u.searchParams.set('or', `(title.ilike.${like},url.ilike.${like})`);
+  u.searchParams.set('limit', String(Math.max(1, Math.min(limit, 8))));
+  const r = await fetch(u.toString(), { headers: sbHeaders(false) });
+  if (!r.ok) return [];
+  const rows = (await r.json()) || [];
+  return rows
+    .filter(x => /\/(products|collections)\//i.test(x.url))
+    .slice(0, limit);
+}
+async function fetchSizeChart() {
+  const u = new URL(`${SUPABASE_URL}/rest/v1/size_chart`);
+  u.searchParams.set('select', '*');
+  u.searchParams.set('order', 'bust_min.asc');
+  const r = await fetch(u.toString(), { headers: sbHeaders(false) });
+  return r.ok ? r.json() : [];
+}
+
+function recommendSizeFromChart(chart, { bust, waist, hip }) {
+  // score by how many measures fall inside a size range; tie-break by smallest upsizing
+  const scored = chart.map(row => {
+    let inside = 0, upsizes = 0;
+    if (bust) { if (bust >= row.bust_min && bust <= row.bust_max) inside++; else if (bust > row.bust_max) upsizes++; }
+    if (waist){ if (waist>= row.waist_min&& waist<= row.waist_max) inside++; else if (waist> row.waist_max) upsizes++; }
+    if (hip)  { if (hip  >= row.hip_min  && hip  <= row.hip_max ) inside++; else if (hip  > row.hip_max ) upsizes++; }
+    const penalty = upsizes; // prefer sizes that don't need upsizing
+    return { row, score: inside, penalty };
+  });
+  scored.sort((a,b)=> b.score - a.score || a.penalty - b.penalty);
+  return scored[0]?.row || null;
+}
 
 /* ----------------------- BRAND BRAIN ----------------------- */
 const BRAND = {
@@ -28,12 +65,24 @@ const BRAND = {
     how:
       "Start an exchange from your order confirmation link or message us with your order number."
   },
-  sizing: {
-    chart:
-      "We provide clear size guidance. Measure bust/waist/hip; if between sizes, choose the larger for comfort.",
-    help:
-      "Share height, weight, usual top/bottom size, and fit preference (snug/regular/modest) for a precise recommendation."
-  },
+  if (i === 'sizing') {
+  const chart = await fetchSizeChart();
+  const ask = `Let's get you a precise fit:
+- Please share **bust/waist/hip** in cm (and height/weight if handy).
+- If between sizes, we suggest taking the **larger** for comfy swim.
+
+Reply like: "bust 92, waist 76, hip 100".`;
+
+  // naive parse if user already sent numbers in the same message
+  const mm = message.match(/bust\s*([0-9]{2,3}).*waist\s*([0-9]{2,3}).*hip\s*([0-9]{2,3})/i);
+  if (mm) {
+    const choice = recommendSizeFromChart(chart, { bust:+mm[1], waist:+mm[2], hip:+mm[3] });
+    if (choice) base = `Based on your measures, **${choice.size}** should fit best.\nIf you prefer a relaxed fit, consider one size up.\n\n${ask}`;
+    else base = ask;
+  } else {
+    base = ask;
+  }
+}
   ordering: {
     steps: [
       "Choose your style, select size/colour, add to cart.",
@@ -177,6 +226,22 @@ Fit: ${BRAND.fit}
 What are you shopping for today (style/coverage/size)? I’ll recommend options.`;
   }
 }
+// 3.5) Product/Collection quick links (if any)
+let quickLinks = '';
+try {
+  // heuristics: only hunt links if the user mentions a style or says 'show', 'find', etc.
+  if (/(show|find|see|price|cost|buy|link|product|collection|burkini|dress|rash|one[- ]?piece|swim)/i.test(message)) {
+    const hits = await findProductsAndCollections(message, 4);
+    if (hits.length) {
+      quickLinks = '\n\n**Quick links:**\n' + hits.map(h => `- [${h.title || 'View'}](${h.url})`).join('\n');
+      const ext = await extLinks(message, 3);
+if (ext.length){
+  quickLinks += '\n\n**Also available on:**\n' + ext.map(e=>`- ${e.store}: [${e.label}](${e.url})`).join('\n');
+}
+
+    }
+  }
+} catch {}
 
 /* ----------------------- POLISH (owner voice) ----------------------- */
 async function polish(message, context) {
@@ -208,6 +273,15 @@ Write a short, specific reply in MEGASKA’s voice. If about delivery, say 3–5
     return context;
   }
 }
+async function extLinks(q, limit=4){
+  const u=new URL(`${SUPABASE_URL}/rest/v1/external_links`);
+  u.searchParams.set('select','store,label,url,notes');
+  u.searchParams.set('or',`(label.ilike.*${encodeURIComponent(q)}*,notes.ilike.*${encodeURIComponent(q)}*)`);
+  u.searchParams.set('limit', String(limit));
+  const r=await fetch(u, { headers: sbHeaders(false) });
+  return r.ok ? r.json() : [];
+}
+
 
 /* ----------------------- HTTP HANDLER ----------------------- */
 export default async function handler(req) {
@@ -251,7 +325,8 @@ export default async function handler(req) {
     }
 
     // 4) Final polish (owner voice)
-    const reply = await polish(message, `${base}${extra}`.trim());
+    const reply = await polish(message, `${base}${extra}${quickLinks}`.trim());
+
 
     return json({ ok: true, reply }, 200, h);
   } catch (e) {
