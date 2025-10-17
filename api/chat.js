@@ -1,5 +1,6 @@
 // /api/chat.js — MEGASKA Smart Fast Path (Edge, brand-grounded)
 export const config = { runtime: 'edge' };
+
 // ---- Shopify live search (keep ONLY one copy of this) ----
 async function shopifySearchProducts(query, limit = 6) {
   const endpoint = `https://${process.env.SHOPIFY_STORE_DOMAIN}/api/2024-10/graphql.json`;
@@ -101,7 +102,6 @@ const BRAND = {
   },
   payments:
     "All common online payment options are supported at checkout (COD only if explicitly enabled on the store).",
-  // Updated with your real WhatsApp:
   contact:
     "WhatsApp/Call us at **+91 9650957372** or message us on the site. Share your order number for fastest help (10:00–18:00 IST).",
   promo: {
@@ -188,19 +188,76 @@ async function fetchSizeChart() {
   return r.ok ? r.json() : [];
 }
 
-function recommendSizeFromChart(chart, { bust, waist, hip }) {
-  // score by how many measures fall inside a size range; tie-break by smallest upsizing
+function recommendSizeFromChart(chart, measures) {
+  // Convert once (don’t mutate across rows), then score per size.
+  let { bust, waist, hip } = measures || {};
+  const looksCm = [bust, waist, hip].some(v => typeof v === 'number' && v >= 60);
+  const toIn = (v) => (typeof v === 'number' && !Number.isNaN(v) ? +(v * 0.393700787).toFixed(1) : null);
+  if (looksCm) { bust = toIn(bust); waist = toIn(waist); hip = toIn(hip); }
+
   const scored = chart.map(row => {
     let inside = 0, upsizes = 0;
-    if (bust > 60) { bust *= 0.3937; waist *= 0.3937; hip *= 0.3937; }
-    if (bust) { if (bust >= row.bust_min && bust <= row.bust_max) inside++; else if (bust > row.bust_max) upsizes++; }
-    if (waist){ if (waist>= row.waist_min&& waist<= row.waist_max) inside++; else if (waist> row.waist_max) upsizes++; }
-    if (hip)  { if (hip  >= row.hip_min  && hip  <= row.hip_max ) inside++; else if (hip  > row.hip_max ) upsizes++; }
+
+    if (typeof bust === 'number') {
+      if (bust >= row.bust_min && bust <= row.bust_max) inside++;
+      else if (bust > row.bust_max) upsizes++;
+    }
+    if (typeof waist === 'number') {
+      if (waist >= row.waist_min && waist <= row.waist_max) inside++;
+      else if (waist > row.waist_max) upsizes++;
+    }
+    if (typeof hip === 'number') {
+      if (hip >= row.hip_min && hip <= row.hip_max) inside++;
+      else if (hip > row.hip_max) upsizes++;
+    }
+
     const penalty = upsizes; // prefer sizes that don't need upsizing
     return { row, score: inside, penalty };
   });
-  scored.sort((a,b)=> b.score - a.score || a.penalty - b.penalty);
+
+  scored.sort((a, b) => b.score - a.score || a.penalty - b.penalty);
   return scored[0]?.row || null;
+}
+
+// === SIZING PARSE & UNIT DETECT ===
+function hasMeasurements(msg) {
+  return /(bust|chest)\s*\d{2,3}|waist\s*\d{2,3}|hip[s]?\s*\d{2,3}/i.test(msg);
+}
+
+function parseMeasurements(msg) {
+  // capture numbers near keywords (order independent)
+  const m = {
+    bust:  (msg.match(/(?:bust|chest)[^\d]{0,6}(\d{2,3})/i)  || [])[1],
+    waist: (msg.match(/waist[^\d]{0,6}(\d{2,3})/i)          || [])[1],
+    hip:   (msg.match(/hips?[^\d]{0,6}(\d{2,3})/i)          || [])[1]
+  };
+  let bust = m.bust ? +m.bust : null;
+  let waist = m.waist ? +m.waist : null;
+  let hip = m.hip ? +m.hip : null;
+
+  // unit detection: if any value looks like cm (>= 60), convert all present to inches
+  const looksCm = [bust, waist, hip].some(v => v && v >= 60);
+  if (looksCm) {
+    const toIn = v => (v ? +(v * 0.393700787).toFixed(1) : v);
+    bust = toIn(bust); waist = toIn(waist); hip = toIn(hip);
+  }
+  return { bust, waist, hip, unit: looksCm ? 'cm' : 'in' };
+}
+
+function formatInches(v) { return v ? `${v}"` : '—'; }
+
+function explainChoice(row, { bust, waist, hip }) {
+  const lines = [];
+  const check = (name, val, lo, hi) => {
+    if (typeof val !== 'number') return;
+    if (val < lo) lines.push(`• Your ${name} (${val}") is a bit **below** ${row.size} range ${lo}–${hi}". Consider one size **down** only if you prefer snug fits.`);
+    else if (val > hi) lines.push(`• Your ${name} (${val}") is **above** ${row.size} range ${lo}–${hi}". Consider one size **up** for comfort.`);
+    else lines.push(`• Your ${name} (${val}") sits **inside** ${row.size} range ${lo}–${hi}".`);
+  };
+  check('bust', bust, row.bust_min, row.bust_max);
+  check('waist', waist, row.waist_min, row.waist_max);
+  check('hips', hip, row.hip_min, row.hip_max);
+  return lines.join('\n');
 }
 
 /* ----------------------- INTENT ----------------------- */
@@ -286,46 +343,6 @@ Write a short, specific reply in MEGASKA’s voice. If about delivery, say 3–5
     return context;
   }
 }
-// === SIZING PARSE & UNIT DETECT ===
-function hasMeasurements(msg) {
-  return /(bust|chest)\s*\d{2,3}|waist\s*\d{2,3}|hip[s]?\s*\d{2,3}/i.test(msg);
-}
-
-function parseMeasurements(msg) {
-  // capture numbers near keywords (order independent)
-  const m = {
-    bust:  (msg.match(/(?:bust|chest)[^\d]{0,6}(\d{2,3})/i)  || [])[1],
-    waist: (msg.match(/waist[^\d]{0,6}(\d{2,3})/i)          || [])[1],
-    hip:   (msg.match(/hips?[^\d]{0,6}(\d{2,3})/i)          || [])[1]
-  };
-  let bust = m.bust ? +m.bust : null;
-  let waist = m.waist ? +m.waist : null;
-  let hip = m.hip ? +m.hip : null;
-
-  // unit detection: if any value looks like cm (>= 60), convert all present to inches
-  const looksCm = [bust, waist, hip].some(v => v && v >= 60);
-  if (looksCm) {
-    const toIn = v => (v ? +(v * 0.393700787).toFixed(1) : v);
-    bust = toIn(bust); waist = toIn(waist); hip = toIn(hip);
-  }
-  return { bust, waist, hip, unit: looksCm ? 'cm' : 'in' };
-}
-
-function formatInches(v) { return v ? `${v}"` : '—'; }
-
-function explainChoice(row, { bust, waist, hip }) {
-  const lines = [];
-  const check = (name, val, lo, hi) => {
-    if (!val) return;
-    if (val < lo) lines.push(`• Your ${name} (${val}") is a bit **below** ${row.size} range ${lo}–${hi}". Consider one size **down** only if you prefer snug fits.`);
-    else if (val > hi) lines.push(`• Your ${name} (${val}") is **above** ${row.size} range ${lo}–${hi}". Consider one size **up** for comfort.`);
-    else lines.push(`• Your ${name} (${val}") sits **inside** ${row.size} range ${lo}–${hi}".`);
-  };
-  check('bust', bust, row.bust_min, row.bust_max);
-  check('waist', waist, row.waist_min, row.waist_max);
-  check('hips', hip, row.hip_min, row.hip_max);
-  return lines.join('\n');
-}
 
 /* ----------------------- HTTP HANDLER ----------------------- */
 export default async function handler(req) {
@@ -336,48 +353,38 @@ export default async function handler(req) {
   if (req.method !== 'POST')    return json({ ok: false, error: 'Method not allowed' }, 405, h);
 
   try {
-    // Inside /api/chat.js, POST branch:
-// ----- request body: accept both {message} and {messages:[...]} -----
-const body = await req.json().catch(() => ({}));
+    // ----- request body: accept both {message} and {messages:[...]} -----
+    const body = await req.json().catch(() => ({}));
 
-function coerceToMessage(b) {
-  // 1) plain string body (just in case)
-  if (typeof b === 'string') return b.trim();
+    function coerceToMessage(b) {
+      if (typeof b === 'string') return b.trim();           // raw string
+      if (b && typeof b.message === 'string' && b.message.trim()) return b.message.trim(); // {message}
 
-  // 2) { message: "..." }
-  if (b && typeof b.message === 'string' && b.message.trim()) return b.message.trim();
-
-  // 3) { messages: [...] } → pick last user, or join contents
-  if (Array.isArray(b?.messages) && b.messages.length) {
-    // content can be string OR array of parts ({type:'text', text:'...'})
-    const getText = (c) => {
-      if (!c) return '';
-      if (typeof c === 'string') return c;
-      if (Array.isArray(c)) return c.map(p => (typeof p === 'string' ? p : p?.text || '')).join(' ').trim();
-      if (typeof c === 'object' && typeof c.content === 'string') return c.content;
-      if (typeof c === 'object' && Array.isArray(c.content)) return c.content.map(p => p?.text || '').join(' ').trim();
+      // {messages:[...]}
+      if (Array.isArray(b?.messages) && b.messages.length) {
+        const getText = (c) => {
+          if (!c) return '';
+          if (typeof c === 'string') return c;
+          if (Array.isArray(c)) return c.map(p => (typeof p === 'string' ? p : p?.text || '')).join(' ').trim();
+          if (typeof c === 'object' && typeof c.content === 'string') return c.content;
+          if (typeof c === 'object' && Array.isArray(c.content)) return c.content.map(p => p?.text || '').join(' ').trim();
+          return '';
+        };
+        const lastUser = [...b.messages].reverse().find(m => m?.role === 'user');
+        if (lastUser) {
+          const txt = getText(lastUser.content);
+          if (txt) return txt.trim();
+        }
+        const joined = b.messages.map(m => getText(m.content)).filter(Boolean).join('\n').trim();
+        if (joined) return joined;
+      }
       return '';
-    };
-    const lastUser = [...b.messages].reverse().find(m => m?.role === 'user');
-    if (lastUser) {
-      const txt = getText(lastUser.content);
-      if (txt) return txt.trim();
     }
-    // fallback: concatenate all message contents
-    const joined = b.messages.map(m => getText(m.content)).filter(Boolean).join('\n').trim();
-    if (joined) return joined;
-  }
 
-  return '';
-}
-
-const message = coerceToMessage(body);
-
-if (!message) {
-  // IMPORTANT: stop emitting the old error that demands { messages: [...] }
-  return json({ ok: false, error: "Missing 'message' string or unreadable payload" }, 400, h);
-}
-
+    const message = coerceToMessage(body);
+    if (!message) {
+      return json({ ok: false, error: "Missing 'message' string or unreadable payload" }, 400, h);
+    }
 
     // 1) Intent
     const i = intent(message);
@@ -387,25 +394,24 @@ if (!message) {
 
     // 2a) Sizing special flow (ask for measurements + compute recommendation if present)
     if (i === 'sizing') {
-  const chart = await fetchSizeChart();
-  const { bust, waist, hip, unit } = parseMeasurements(message);
+      const chart = await fetchSizeChart();
+      const { bust, waist, hip, unit } = parseMeasurements(message);
 
-  // If user didn’t give numbers → ask for them, do not show products
-  if (!bust && !waist && !hip) {
-    const ask = `Let's get your best **MEGASKA brand size**:
+      // If user didn’t give numbers → ask for them, do not show products
+      if (bust == null && waist == null && hip == null) {
+        const ask = `Let's get your best **MEGASKA brand size**:
 - Share **bust / waist / hips** (you can type like: "bust 36, waist 32, hips 38").
-- We accept **inches** or **cm** (we’ll detect it).  
+- We accept **inches** or **cm** (we’ll detect it).
 If between sizes, choose the **larger** for a modest, comfy fit.`;
-    base = ask;
-    // prevent product suggestions for pure sizing flow:
-    return json({ ok: true, reply: await polish(message, base) }, 200, h);
-  }
+        base = ask;
+        return json({ ok: true, reply: await polish(message, base) }, 200, h);
+      }
 
-  // We have numbers → recommend a size
-  const pick = recommendSizeFromChart(chart, { bust, waist, hip });
-  if (pick) {
-    const explain = explainChoice(pick, { bust, waist, hip });
-    base =
+      // We have numbers → recommend a size
+      const pick = recommendSizeFromChart(chart, { bust, waist, hip });
+      if (pick) {
+        const explain = explainChoice(pick, { bust, waist, hip });
+        base =
 `Based on your measurements (${unit} detected, converted to inches for matching):
 - **Bust:** ${formatInches(bust)}  | **Waist:** ${formatInches(waist)} | **Hips:** ${formatInches(hip)}
 
@@ -415,14 +421,14 @@ ${explain || ''}
 
 Tip: Prefer a **relaxed** feel? Take one size **up**. Want **snug/active** fit? Stay with ${pick.size}.
 Need help picking a style (full-length Islamic, knee-length, dress type, tops/bottoms)? Tell me your preference and I’ll suggest styles.`;
-  } else {
-    base = `Thanks! Your numbers sit across multiple ranges. If you share a photo or tell me your **fit preference** (snug / relaxed), I’ll fine-tune the size. Otherwise choose the **larger** size for swim comfort.`;
-  }
+      } else {
+        base = `Thanks! Your numbers sit across multiple ranges. If you share a photo or tell me your **fit preference** (snug / relaxed), I’ll fine-tune the size. Otherwise choose the **larger** size for swim comfort.`;
+      }
 
-  // IMPORTANT: Don’t attach product/collection links in a sizing-only reply
-  const reply = await polish(message, base);
-  return json({ ok: true, reply }, 200, h);
-}
+      // IMPORTANT: Don’t attach product/collection links in a sizing-only reply
+      const reply = await polish(message, base);
+      return json({ ok: true, reply }, 200, h);
+    }
 
     // 3) Quick enrichment (keyword first)
     let extra = '';
@@ -445,41 +451,36 @@ Need help picking a style (full-length Islamic, knee-length, dress type, tops/bo
 
     // 5) Product/Collection quick links + external links (Amazon/Myntra) when relevant
     let linkBlock = '';
-try {
-  // stronger trigger: product-y or style phrases
-  const wantsLinks = /(show|find|see|price|cost|buy|link|product|collection|swim|swimwear|burkini|dress|rash|one[- ]?piece|top|bottom|knee|full[- ]?length)/i.test(message);
-  // never attach links if we’re in sizing WITH measurements (you already early-return in that branch)
-  if (wantsLinks && i !== 'sizing') {
-    let hits = [];
-    // 1) Shopify live search
     try {
-      hits = await shopifySearchProducts(message, 6);
-    } catch (e) {
-      console.error('shopifySearchProducts error', e);
-    }
-    // 2) Fallback to your Supabase page index if Shopify returns nothing
-    if (!hits.length) {
-      hits = await findProductsAndCollections(message, 6);
-    }
-    if (hits.length) {
-      linkBlock += '\n\n**Quick links:**\n' + hits.map(h => `- [${h.title || 'View'}](${h.url})`).join('\n');
-    }
-    // 3) Optional marketplaces
-    try {
-      const exts = await extLinks(message, 3);
-      if (exts.length) {
-        linkBlock += '\n\n**Also available on:**\n' + exts.map(e => `- ${e.store}: [${e.label}](${e.url})`).join('\n');
+      const wantsLinks = /(show|find|see|price|cost|buy|link|product|collection|swim|swimwear|burkini|dress|rash|one[- ]?piece|top|bottom|knee|full[- ]?length)/i.test(message);
+      if (wantsLinks && i !== 'sizing') {
+        let hits = [];
+        try {
+          hits = await shopifySearchProducts(message, 6);
+        } catch (e) {
+          console.error('shopifySearchProducts error', e);
+        }
+        if (!hits.length) {
+          hits = await findProductsAndCollections(message, 6);
+        }
+        if (hits.length) {
+          linkBlock += '\n\n**Quick links:**\n' + hits.map(h => `- [${h.title || 'View'}](${h.url})`).join('\n');
+        }
+        try {
+          const exts = await extLinks(message, 3);
+          if (exts.length) {
+            linkBlock += '\n\n**Also available on:**\n' + exts.map(e => `- ${e.store}: [${e.label}](${e.url})`).join('\n');
+          }
+        } catch {}
       }
-    } catch {}
-  }
-} catch (e) {
-  console.error('linkBlock error', e);
-}
+    } catch (e) {
+      console.error('linkBlock error', e);
+    }
 
     // 6) Final polish (owner voice)
     const reply = await polish(message, `${base}${extra}${linkBlock}`.trim());
-
     return json({ ok: true, reply }, 200, h);
+
   } catch (e) {
     return json({ ok: false, error: e?.message || String(e) }, 500, h);
   }
