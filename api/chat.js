@@ -1,107 +1,10 @@
-// /api/chat.js — MEGASKA Smart Fast Path (Edge, brand-grounded, no sources)
+// /api/chat.js — MEGASKA Smart Fast Path (Edge, brand-grounded)
 export const config = { runtime: 'edge' };
 
+/* ----------------------- ENV ----------------------- */
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const OPENAI_KEY   = process.env.OPENAI_API_KEY;
-async function findProductsAndCollections(q, limit = 4) {
-  const base = `${SUPABASE_URL}/rest/v1/web_pages`;
-  const sel  = 'url,title';
-  const like = encodeURIComponent(`*${q}*`);
-  const u = new URL(base);
-  u.searchParams.set('select', sel);
-  // match on title/url, then filter to products/collections
-  u.searchParams.set('or', `(title.ilike.${like},url.ilike.${like})`);
-  u.searchParams.set('limit', String(Math.max(1, Math.min(limit, 8))));
-  const r = await fetch(u.toString(), { headers: sbHeaders(false) });
-  if (!r.ok) return [];
-  const rows = (await r.json()) || [];
-  return rows
-    .filter(x => /\/(products|collections)\//i.test(x.url))
-    .slice(0, limit);
-}
-async function fetchSizeChart() {
-  const u = new URL(`${SUPABASE_URL}/rest/v1/size_chart`);
-  u.searchParams.set('select', '*');
-  u.searchParams.set('order', 'bust_min.asc');
-  const r = await fetch(u.toString(), { headers: sbHeaders(false) });
-  return r.ok ? r.json() : [];
-}
-
-function recommendSizeFromChart(chart, { bust, waist, hip }) {
-  // score by how many measures fall inside a size range; tie-break by smallest upsizing
-  const scored = chart.map(row => {
-    let inside = 0, upsizes = 0;
-    if (bust) { if (bust >= row.bust_min && bust <= row.bust_max) inside++; else if (bust > row.bust_max) upsizes++; }
-    if (waist){ if (waist>= row.waist_min&& waist<= row.waist_max) inside++; else if (waist> row.waist_max) upsizes++; }
-    if (hip)  { if (hip  >= row.hip_min  && hip  <= row.hip_max ) inside++; else if (hip  > row.hip_max ) upsizes++; }
-    const penalty = upsizes; // prefer sizes that don't need upsizing
-    return { row, score: inside, penalty };
-  });
-  scored.sort((a,b)=> b.score - a.score || a.penalty - b.penalty);
-  return scored[0]?.row || null;
-}
-
-/* ----------------------- BRAND BRAIN ----------------------- */
-const BRAND = {
-  name: "MEGASKA",
-  whatWeDo:
-    "Modest & stylish swimwear for Indian women — from swim dresses and one-pieces to burkinis and rash guards. Mix-and-match swim tops & bottoms for flexibility.",
-  tone:
-    "friendly, confident, concise, owner-led; speak as MEGASKA (first party), never generic.",
-  materials:
-    "Premium polyester–spandex (polyester lycra) blends that are quick-dry, durable, and comfortable with reasonable stretch.",
-  fit:
-    "Designed with Indian women’s body types in mind for confident coverage and comfort.",
-  delivery: {
-    dispatch: "Most orders ship within 1 business day after confirmation.",
-    timeframe: "Delivery across India is typically 3–5 working days depending on city/courier availability.",
-    express: "We use one reliable method for all orders (no separate 'express'/'standard' tiers).",
-    tracking: "Tracking is shared via email/WhatsApp as soon as the order is dispatched."
-  },
-  returns: {
-    policy:
-      "Easy exchanges within the policy window for unused items with tags intact; standard hygiene rules apply for swimwear.",
-    how:
-      "Start an exchange from your order confirmation link or message us with your order number."
-  },
-  if (i === 'sizing') {
-  const chart = await fetchSizeChart();
-  const ask = `Let's get you a precise fit:
-- Please share **bust/waist/hip** in cm (and height/weight if handy).
-- If between sizes, we suggest taking the **larger** for comfy swim.
-
-Reply like: "bust 92, waist 76, hip 100".`;
-
-  // naive parse if user already sent numbers in the same message
-  const mm = message.match(/bust\s*([0-9]{2,3}).*waist\s*([0-9]{2,3}).*hip\s*([0-9]{2,3})/i);
-  if (mm) {
-    const choice = recommendSizeFromChart(chart, { bust:+mm[1], waist:+mm[2], hip:+mm[3] });
-    if (choice) base = `Based on your measures, **${choice.size}** should fit best.\nIf you prefer a relaxed fit, consider one size up.\n\n${ask}`;
-    else base = ask;
-  } else {
-    base = ask;
-  }
-}
-  ordering: {
-    steps: [
-      "Choose your style, select size/colour, add to cart.",
-      "Checkout with shipping details and payment.",
-      "Get instant order confirmation on email/WhatsApp.",
-      "We pack within 1 business day and share tracking."
-    ]
-  },
-  payments:
-    "All common online payment options are supported at checkout (COD only if explicitly enabled on the store).",
-  contact:
-    "Reply to your order message or use the site contact—share your order number for quickest help.",
-  promo: {
-    code: "MEGA15",
-    desc: "Use code MEGA15 for 15% off on all orders."
-  },
-  clearance:
-    "We’re running a clearance sale on shapewear and sleepwear collections—limited sizes while stocks last."
-};
 
 /* ----------------------- UTILS ----------------------- */
 const json = (obj, status = 200, extra = {}) =>
@@ -131,7 +34,51 @@ function sbHeaders(jsonType = true) {
   return h;
 }
 
-/* ----------------------- QUICK KEYWORD SEARCH ----------------------- */
+/* ----------------------- BRAND BRAIN ----------------------- */
+const BRAND = {
+  name: "MEGASKA",
+  whatWeDo:
+    "Modest & stylish swimwear for Indian women — from swim dresses and one-pieces to burkinis and rash guards. Mix-and-match swim tops & bottoms for flexibility.",
+  tone:
+    "friendly, confident, concise, owner-led; speak as MEGASKA (first party), never generic.",
+  materials:
+    "Premium polyester–spandex (polyester lycra) blends that are quick-dry, durable, and comfortable with reasonable stretch.",
+  fit:
+    "Designed with Indian women’s body types in mind for confident coverage and comfort.",
+  delivery: {
+    dispatch: "Most orders ship within 1 business day after confirmation.",
+    timeframe: "Delivery across India is typically 3–5 working days depending on city/courier availability.",
+    express: "We use one reliable method for all orders (no separate 'express'/'standard' tiers).",
+    tracking: "Tracking is shared via email/WhatsApp as soon as the order is dispatched."
+  },
+  returns: {
+    policy:
+      "Easy exchanges within the policy window for unused items with tags intact; standard hygiene rules apply for swimwear.",
+    how:
+      "Start an exchange from your order confirmation link or message us with your order number."
+  },
+  ordering: {
+    steps: [
+      "Choose your style, select size/colour, add to cart.",
+      "Checkout with shipping details and payment.",
+      "Get instant order confirmation on email/WhatsApp.",
+      "We pack within 1 business day and share tracking."
+    ]
+  },
+  payments:
+    "All common online payment options are supported at checkout (COD only if explicitly enabled on the store).",
+  // Updated with your real WhatsApp:
+  contact:
+    "WhatsApp/Call us at **+91 9650957372** or message us on the site. Share your order number for fastest help (10:00–18:00 IST).",
+  promo: {
+    code: "MEGA15",
+    desc: "Use code MEGA15 for 15% off on all orders."
+  },
+  clearance:
+    "We’re running a clearance sale on shapewear and sleepwear collections—limited sizes while stocks last."
+};
+
+/* ----------------------- LIGHT SEARCH (keyword) ----------------------- */
 async function kwPages(q, limit = 6) {
   const u = new URL(`${SUPABASE_URL}/rest/v1/web_pages`);
   u.searchParams.set('select', 'url,title');
@@ -172,6 +119,55 @@ async function matchChunks(queryEmbedding, count = 10, thresh = 0.66) {
   return r.json();
 }
 
+/* ----------------------- PRODUCT/COLLECTION LINKING ----------------------- */
+async function findProductsAndCollections(q, limit = 4) {
+  const base = `${SUPABASE_URL}/rest/v1/web_pages`;
+  const sel  = 'url,title';
+  const like = encodeURIComponent(`*${q}*`);
+  const u = new URL(base);
+  u.searchParams.set('select', sel);
+  u.searchParams.set('or', `(title.ilike.${like},url.ilike.${like})`);
+  u.searchParams.set('limit', String(Math.max(1, Math.min(limit, 8))));
+  const r = await fetch(u.toString(), { headers: sbHeaders(false) });
+  if (!r.ok) return [];
+  const rows = (await r.json()) || [];
+  return rows
+    .filter(x => /\/(products|collections)\//i.test(x.url))
+    .slice(0, limit);
+}
+
+async function extLinks(q, limit = 4) {
+  const u = new URL(`${SUPABASE_URL}/rest/v1/external_links`);
+  u.searchParams.set('select', 'store,label,url,notes');
+  u.searchParams.set('or', `(label.ilike.*${encodeURIComponent(q)}*,notes.ilike.*${encodeURIComponent(q)}*)`);
+  u.searchParams.set('limit', String(limit));
+  const r = await fetch(u.toString(), { headers: sbHeaders(false) });
+  return r.ok ? r.json() : [];
+}
+
+/* ----------------------- SIZING HELPERS ----------------------- */
+async function fetchSizeChart() {
+  const u = new URL(`${SUPABASE_URL}/rest/v1/size_chart`);
+  u.searchParams.set('select', '*');
+  u.searchParams.set('order', 'bust_min.asc');
+  const r = await fetch(u.toString(), { headers: sbHeaders(false) });
+  return r.ok ? r.json() : [];
+}
+
+function recommendSizeFromChart(chart, { bust, waist, hip }) {
+  // score by how many measures fall inside a size range; tie-break by smallest upsizing
+  const scored = chart.map(row => {
+    let inside = 0, upsizes = 0;
+    if (bust) { if (bust >= row.bust_min && bust <= row.bust_max) inside++; else if (bust > row.bust_max) upsizes++; }
+    if (waist){ if (waist>= row.waist_min&& waist<= row.waist_max) inside++; else if (waist> row.waist_max) upsizes++; }
+    if (hip)  { if (hip  >= row.hip_min  && hip  <= row.hip_max ) inside++; else if (hip  > row.hip_max ) upsizes++; }
+    const penalty = upsizes; // prefer sizes that don't need upsizing
+    return { row, score: inside, penalty };
+  });
+  scored.sort((a,b)=> b.score - a.score || a.penalty - b.penalty);
+  return scored[0]?.row || null;
+}
+
 /* ----------------------- INTENT ----------------------- */
 function intent(message) {
   const m = message.toLowerCase();
@@ -200,11 +196,6 @@ Share your city/pincode and I’ll estimate more precisely.`;
 - ${BRAND.returns.policy}
 - ${BRAND.returns.how}
 Tell me your order number and what you’d like to change.`;
-    case 'sizing':
-      return `Let’s get your size right:
-- ${BRAND.sizing.chart}
-- ${BRAND.sizing.help}
-Tell me height, weight, usual sizes, and fit preference—I'll recommend a size.`;
     case 'ordering':
       return `Ordering on ${BRAND.name}:
 - ${BRAND.ordering.steps.join('\n- ')}
@@ -226,22 +217,6 @@ Fit: ${BRAND.fit}
 What are you shopping for today (style/coverage/size)? I’ll recommend options.`;
   }
 }
-// 3.5) Product/Collection quick links (if any)
-let quickLinks = '';
-try {
-  // heuristics: only hunt links if the user mentions a style or says 'show', 'find', etc.
-  if (/(show|find|see|price|cost|buy|link|product|collection|burkini|dress|rash|one[- ]?piece|swim)/i.test(message)) {
-    const hits = await findProductsAndCollections(message, 4);
-    if (hits.length) {
-      quickLinks = '\n\n**Quick links:**\n' + hits.map(h => `- [${h.title || 'View'}](${h.url})`).join('\n');
-      const ext = await extLinks(message, 3);
-if (ext.length){
-  quickLinks += '\n\n**Also available on:**\n' + ext.map(e=>`- ${e.store}: [${e.label}](${e.url})`).join('\n');
-}
-
-    }
-  }
-} catch {}
 
 /* ----------------------- POLISH (owner voice) ----------------------- */
 async function polish(message, context) {
@@ -273,22 +248,13 @@ Write a short, specific reply in MEGASKA’s voice. If about delivery, say 3–5
     return context;
   }
 }
-async function extLinks(q, limit=4){
-  const u=new URL(`${SUPABASE_URL}/rest/v1/external_links`);
-  u.searchParams.set('select','store,label,url,notes');
-  u.searchParams.set('or',`(label.ilike.*${encodeURIComponent(q)}*,notes.ilike.*${encodeURIComponent(q)}*)`);
-  u.searchParams.set('limit', String(limit));
-  const r=await fetch(u, { headers: sbHeaders(false) });
-  return r.ok ? r.json() : [];
-}
-
 
 /* ----------------------- HTTP HANDLER ----------------------- */
 export default async function handler(req) {
   const h = cors(req);
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: h });
-  if (req.method === 'GET')     return json({ ok: true, route: '/api/chat', version: 'megha-fastpath-v1', ts: Date.now() }, 200, h);
+  if (req.method === 'GET')     return json({ ok: true, route: '/api/chat', version: 'megha-fastpath-v2', ts: Date.now() }, 200, h);
   if (req.method !== 'POST')    return json({ ok: false, error: 'Method not allowed' }, 405, h);
 
   try {
@@ -297,36 +263,67 @@ export default async function handler(req) {
       return json({ ok: false, error: "Missing 'message' string" }, 400, h);
     }
 
-    // 1) Fast intent answer from Brand Brain
+    // 1) Intent
     const i = intent(message);
+
+    // 2) Base answer
     let base = answerFromBrand(i);
 
-    // 2) Quick enrichment (keyword first)
+    // 2a) Sizing special flow (ask for measurements + compute recommendation if present)
+    if (i === 'sizing') {
+      const chart = await fetchSizeChart();
+      const ask = `Let's get you a precise fit:
+- Please share **bust/waist/hip** in cm (and height/weight if handy).
+- If between sizes, we suggest taking the **larger** for comfy swim.
+
+Reply like: "bust 92, waist 76, hip 100".`;
+      const mm = message.match(/bust\s*([0-9]{2,3}).*waist\s*([0-9]{2,3}).*hip\s*([0-9]{2,3})/i);
+      if (mm && chart?.length) {
+        const choice = recommendSizeFromChart(chart, { bust:+mm[1], waist:+mm[2], hip:+mm[3] });
+        base = choice
+          ? `Based on your measures, **${choice.size}** should fit best.\nIf you prefer a relaxed fit, consider one size up.\n\n${ask}`
+          : ask;
+      } else {
+        base = ask;
+      }
+    }
+
+    // 3) Quick enrichment (keyword first)
     let extra = '';
     try {
       const term = i === 'delivery' ? 'shipping' : i;
       const [pHits, cHits] = await Promise.all([kwPages(term, 4), kwChunks(term, 6)]);
       const snippets = (cHits || []).slice(0, 3).map(x => (x.content || '').slice(0, 300));
       if (snippets.length) extra = `\n\n${snippets.join('\n\n')}`;
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
 
-    // 3) If still thin and the question is long/specific, try embeddings briefly
+    // 4) If still thin and the question is long/specific, try embeddings briefly
     if (!extra && message.length > 30) {
       try {
         const qemb = await embed(message);
         const matches = await matchChunks(qemb, 8, 0.64);
         const enrich = (matches || []).slice(0, 3).map(m => (m.content || '').slice(0, 300)).join('\n\n');
         if (enrich) extra = `\n\n${enrich}`;
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
     }
 
-    // 4) Final polish (owner voice)
-    const reply = await polish(message, `${base}${extra}${quickLinks}`.trim());
+    // 5) Product/Collection quick links + external links (Amazon/Myntra) when relevant
+    let linkBlock = '';
+    try {
+      if (/(show|find|see|price|cost|buy|link|product|collection|burkini|dress|rash|one[- ]?piece|swim)/i.test(message)) {
+        const hits = await findProductsAndCollections(message, 4);
+        if (hits.length) {
+          linkBlock += '\n\n**Quick links:**\n' + hits.map(h => `- [${h.title || 'View'}](${h.url})`).join('\n');
+        }
+        const exts = await extLinks(message, 3);
+        if (exts.length) {
+          linkBlock += '\n\n**Also available on:**\n' + exts.map(e => `- ${e.store}: [${e.label}](${e.url})`).join('\n');
+        }
+      }
+    } catch { /* ignore */ }
 
+    // 6) Final polish (owner voice)
+    const reply = await polish(message, `${base}${extra}${linkBlock}`.trim());
 
     return json({ ok: true, reply }, 200, h);
   } catch (e) {
