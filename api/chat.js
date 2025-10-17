@@ -1,5 +1,6 @@
 // /api/chat.js — MEGASKA Smart Fast Path (Edge, brand-grounded)
 export const config = { runtime: 'edge' };
+// ---- Shopify live search (keep ONLY one copy of this) ----
 async function shopifySearchProducts(query, limit = 6) {
   const endpoint = `https://${process.env.SHOPIFY_STORE_DOMAIN}/api/2024-10/graphql.json`;
   const r = await fetch(endpoint, {
@@ -21,12 +22,7 @@ async function shopifySearchProducts(query, limit = 6) {
       variables: { q: query, n: limit }
     })
   });
-
-  if (!r.ok) {
-    console.error('shopifySearchProducts HTTP', r.status);
-    return [];
-  }
-
+  if (!r.ok) return [];
   const j = await r.json().catch(() => ({}));
   const products = (j.data?.products?.edges || []).map(({ node }) => ({
     title: node.title,
