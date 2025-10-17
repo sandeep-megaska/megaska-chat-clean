@@ -46,39 +46,6 @@ const json = (obj, status = 200, extra = {}) =>
     status,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extra }
   });
-async function shopifySearchProducts(query, limit = 4) {
-  const endpoint = `https://${process.env.SHOPIFY_STORE_DOMAIN}/api/2024-10/graphql.json`;
-  const r = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'X-Shopify-Storefront-Access-Token': process.env.SHOPIFY_STOREFRONT_TOKEN,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      query: `
-        query($q:String!, $n:Int!) {
-          products(first:$n, query:$q) {
-            edges { node { handle title onlineStoreUrl } }
-          }
-          collections(first:$n, query:$q) {
-            edges { node { handle title } }
-          }
-        }`,
-      variables: { q: query, n: limit }
-    })
-  });
-  if (!r.ok) return [];
-  const j = await r.json();
-  const products = (j.data?.products?.edges || []).map(({ node }) => ({
-    title: node.title,
-    url: node.onlineStoreUrl || `https://megaska.com/products/${node.handle}`
-  }));
-  const collections = (j.data?.collections?.edges || []).map(({ node }) => ({
-    title: node.title,
-    url: `https://megaska.com/collections/${node.handle}`
-  }));
-  return [...products, ...collections].slice(0, limit);
-}
 
 const cors = (req) => {
   const origin = req.headers.get('Origin') || '*';
