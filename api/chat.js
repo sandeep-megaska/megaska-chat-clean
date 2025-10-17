@@ -12,6 +12,39 @@ const json = (obj, status = 200, extra = {}) =>
     status,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extra }
   });
+async function shopifySearchProducts(query, limit = 4) {
+  const endpoint = `https://${process.env.SHOPIFY_STORE_DOMAIN}/api/2024-10/graphql.json`;
+  const r = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'X-Shopify-Storefront-Access-Token': process.env.SHOPIFY_STOREFRONT_TOKEN,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      query: `
+        query($q:String!, $n:Int!) {
+          products(first:$n, query:$q) {
+            edges { node { handle title onlineStoreUrl } }
+          }
+          collections(first:$n, query:$q) {
+            edges { node { handle title } }
+          }
+        }`,
+      variables: { q: query, n: limit }
+    })
+  });
+  if (!r.ok) return [];
+  const j = await r.json();
+  const products = (j.data?.products?.edges || []).map(({ node }) => ({
+    title: node.title,
+    url: node.onlineStoreUrl || `https://megaska.com/products/${node.handle}`
+  }));
+  const collections = (j.data?.collections?.edges || []).map(({ node }) => ({
+    title: node.title,
+    url: `https://megaska.com/collections/${node.handle}`
+  }));
+  return [...products, ...collections].slice(0, limit);
+}
 
 const cors = (req) => {
   const origin = req.headers.get('Origin') || '*';
@@ -373,18 +406,19 @@ Need help picking a style (full-length Islamic, knee-length, dress type, tops/bo
 
     // 5) Product/Collection quick links + external links (Amazon/Myntra) when relevant
     let linkBlock = '';
-    try {
-      if (/(show|find|see|price|cost|buy|link|product|collection|burkini|dress|rash|one[- ]?piece|swim)/i.test(message)) {
-        const hits = await findProductsAndCollections(message, 4);
-        if (hits.length) {
-          linkBlock += '\n\n**Quick links:**\n' + hits.map(h => `- [${h.title || 'View'}](${h.url})`).join('\n');
-        }
-        const exts = await extLinks(message, 3);
-        if (exts.length) {
-          linkBlock += '\n\n**Also available on:**\n' + exts.map(e => `- ${e.store}: [${e.label}](${e.url})`).join('\n');
-        }
-      }
-    } catch { /* ignore */ }
+try {
+  if (/(show|find|see|price|cost|buy|link|product|collection|burkini|dress|rash|one[- ]?piece|swim)/i.test(message)) {
+    let hits = await shopifySearchProducts(message, 4);
+    if (!hits.length) hits = await findProductsAndCollections(message, 4); // fallback to your indexed pages
+    if (hits.length) {
+      linkBlock += '\n\n**Quick links:**\n' + hits.map(h => `- [${h.title || 'View'}](${h.url})`).join('\n');
+    }
+    const exts = await extLinks(message, 3);
+    if (exts.length) {
+      linkBlock += '\n\n**Also available on:**\n' + exts.map(e => `- ${e.store}: [${e.label}](${e.url})`).join('\n');
+    }
+  }
+} catch {}
 
     // 6) Final polish (owner voice)
     const reply = await polish(message, `${base}${extra}${linkBlock}`.trim());
