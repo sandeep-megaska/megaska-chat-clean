@@ -336,19 +336,45 @@ export default async function handler(req) {
 
   try {
     // Inside /api/chat.js, POST branch:
+// ----- request body: accept both {message} and {messages:[...]} -----
 const body = await req.json().catch(() => ({}));
 
-// Accept BOTH {message: "..."} and {messages:[{role,content}, ...]}
-let message = body?.message;
-if (!message && Array.isArray(body?.messages)) {
-  // combine assistant/user contents; prefer latest user
-  const lastUser = [...body.messages].reverse().find(m => m?.role === 'user');
-  message = lastUser?.content || body.messages.map(m => m?.content || '').join('\n').trim();
+function coerceToMessage(b) {
+  // 1) plain string body (just in case)
+  if (typeof b === 'string') return b.trim();
+
+  // 2) { message: "..." }
+  if (b && typeof b.message === 'string' && b.message.trim()) return b.message.trim();
+
+  // 3) { messages: [...] } → pick last user, or join contents
+  if (Array.isArray(b?.messages) && b.messages.length) {
+    // content can be string OR array of parts ({type:'text', text:'...'})
+    const getText = (c) => {
+      if (!c) return '';
+      if (typeof c === 'string') return c;
+      if (Array.isArray(c)) return c.map(p => (typeof p === 'string' ? p : p?.text || '')).join(' ').trim();
+      if (typeof c === 'object' && typeof c.content === 'string') return c.content;
+      if (typeof c === 'object' && Array.isArray(c.content)) return c.content.map(p => p?.text || '').join(' ').trim();
+      return '';
+    };
+    const lastUser = [...b.messages].reverse().find(m => m?.role === 'user');
+    if (lastUser) {
+      const txt = getText(lastUser.content);
+      if (txt) return txt.trim();
+    }
+    // fallback: concatenate all message contents
+    const joined = b.messages.map(m => getText(m.content)).filter(Boolean).join('\n').trim();
+    if (joined) return joined;
+  }
+
+  return '';
 }
 
-// final validation
-if (!message || typeof message !== 'string' || !message.trim()) {
-  return json({ ok: false, error: "Missing 'message' string or empty content" }, 400, h);
+const message = coerceToMessage(body);
+
+if (!message) {
+  // IMPORTANT: stop emitting the old error that demands { messages: [...] }
+  return json({ ok: false, error: "Missing 'message' string or unreadable payload" }, 400, h);
 }
 
 
