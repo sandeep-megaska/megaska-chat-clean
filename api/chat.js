@@ -1,98 +1,12 @@
-// /api/chat.js — MEGASKA Smart Fast Path (Edge, brand-grounded)
+// /api/chat.js — MEGASKA smart assistant (Edge)
 export const config = { runtime: 'edge' };
 
-// ---- Shopify live search (keep ONLY one copy of this) ----
-// ---- Shopify live search (single definition only) ----
-async function shopifySearchProducts(userText, limit = 6) {
-  const endpoint = `https://${process.env.SHOPIFY_STORE_DOMAIN}/api/2024-10/graphql.json`;
-
-  // 1) Normalize the query (strip filler words, keep product-y tokens)
-  const text = String(userText || '').toLowerCase();
-  const tokens = text
-    .replace(/[^a-z0-9\s-]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
-
-  // Keep meaningful tokens only
-  const KEEP = new Set([
-    'knee','length','knee-length','kneelength',
-    'swim','swimwear','dress','one','piece','one-piece','onepiece',
-    'burkini','rash','guard','top','bottom','modest','islamic','full','coverage'
-  ]);
-  const terms = tokens.filter(t => KEEP.has(t)) ;
-
-  // Add a couple of phrase guesses
-  const phrases = [];
-  if (text.includes('knee') && text.includes('length')) phrases.push('"knee length"');
-  if (text.includes('one') && text.includes('piece')) phrases.push('"one piece"');
-  if (text.includes('rash') && text.includes('guard')) phrases.push('"rash guard"');
-  if (text.includes('full') && text.includes('length')) phrases.push('"full length"');
-  if (text.includes('islamic')) phrases.push('islamic');
-
-  // 2) Build Shopify query
-  // Try titles first, then tags, then broad product_type
-  const unique = Array.from(new Set([...terms]));
-  const titleParts = unique.map(t => `title:*${t}*`);
-  const tagParts   = unique.map(t => `tag:${t}`);
-  const phraseParts= phrases.map(p => `title:${p}`);
-
-  let q = [...phraseParts, ...titleParts, ...tagParts, `product_type:swimwear`]
-    .filter(Boolean)
-    .join(' OR ');
-  if (!q) q = 'product_type:swimwear'; // last resort
-
-  // 3) Call Storefront API
-  const r = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'X-Shopify-Storefront-Access-Token': process.env.SHOPIFY_STOREFRONT_TOKEN,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      query: `
-        query($q:String!, $n:Int!) {
-          products(first:$n, query:$q) {
-            edges { node { handle title onlineStoreUrl } }
-          }
-          collections(first:$n, query:$q) {
-            edges { node { handle title } }
-          }
-        }`,
-      variables: { q, n: limit }
-    })
-  });
-
-  if (!r.ok) return [];
-
-  const j = await r.json().catch(() => ({}));
-
-  // 4) Shape results
-  const products = (j.data?.products?.edges || []).map(({ node }) => ({
-    title: node.title,
-    url: node.onlineStoreUrl || `https://megaska.com/products/${node.handle}`
-  }));
-  const collections = (j.data?.collections?.edges || []).map(({ node }) => ({
-    title: node.title,
-    url: `https://megaska.com/collections/${node.handle}`
-  }));
-
-  // 5) Final fallback: if nothing, point to on-site search for the phrase
-  const hits = [...products, ...collections];
-  if (!hits.length) {
-    return [{
-      title: 'Search results on MEGASKA',
-      url: `https://megaska.com/search?q=${encodeURIComponent(userText)}`
-    }];
-  }
-  return hits.slice(0, limit);
-}
-
-/* ----------------------- ENV ----------------------- */
+/* ============================ ENV ============================ */
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 const OPENAI_KEY   = process.env.OPENAI_API_KEY;
 
-/* ----------------------- UTILS ----------------------- */
+/* ============================ UTIL ============================ */
 const json = (obj, status = 200, extra = {}) =>
   new Response(JSON.stringify(obj), {
     status,
@@ -120,7 +34,7 @@ function sbHeaders(jsonType = true) {
   return h;
 }
 
-/* ----------------------- BRAND BRAIN ----------------------- */
+/* ======================== BRAND BRAIN ========================= */
 const BRAND = {
   name: "MEGASKA",
   whatWeDo:
@@ -128,7 +42,7 @@ const BRAND = {
   tone:
     "friendly, confident, concise, owner-led; speak as MEGASKA (first party), never generic.",
   materials:
-    "Premium polyester–spandex (polyester lycra) blends that are quick-dry, durable, and comfortable with reasonable stretch.",
+    "Premium polyester–spandex blends (polyester lycra): quick-dry, durable, comfortable stretch.",
   fit:
     "Designed with Indian women’s body types in mind for confident coverage and comfort.",
   delivery: {
@@ -143,27 +57,16 @@ const BRAND = {
     how:
       "Start an exchange from your order confirmation link or message us with your order number."
   },
-  ordering: {
-    steps: [
-      "Choose your style, select size/colour, add to cart.",
-      "Checkout with shipping details and payment.",
-      "Get instant order confirmation on email/WhatsApp.",
-      "We pack within 1 business day and share tracking."
-    ]
-  },
   payments:
     "All common online payment options are supported at checkout (COD only if explicitly enabled on the store).",
-  contact:
-    "WhatsApp/Call us at **+91 9650957372** or message us on the site. Share your order number for fastest help (10:00–18:00 IST).",
-  promo: {
-    code: "MEGA15",
-    desc: "Use code MEGA15 for 15% off on all orders."
-  },
+  contactDefault:
+    "WhatsApp/Call us at **+91 9650957372** (10:00–18:00 IST). Share your order number for fastest help.",
+  promoDefault: { code: "MEGA15", desc: "Use code MEGA15 for 15% off on all orders." },
   clearance:
     "We’re running a clearance sale on shapewear and sleepwear collections—limited sizes while stocks last."
 };
 
-/* ----------------------- LIGHT SEARCH (keyword) ----------------------- */
+/* ========================= LIGHT SEARCH ======================= */
 async function kwPages(q, limit = 6) {
   const u = new URL(`${SUPABASE_URL}/rest/v1/web_pages`);
   u.searchParams.set('select', 'url,title');
@@ -182,7 +85,7 @@ async function kwChunks(q, limit = 10) {
   return r.ok ? r.json() : [];
 }
 
-/* ----------------------- EMBEDDINGS (fallback) ----------------------- */
+/* ======================= EMBEDDINGS FALLBACK ================== */
 async function embed(text) {
   const r = await fetch('https://api.openai.com/v1/embeddings', {
     method: 'POST',
@@ -204,24 +107,19 @@ async function matchChunks(queryEmbedding, count = 10, thresh = 0.66) {
   return r.json();
 }
 
-/* ----------------------- PRODUCT/COLLECTION LINKING ----------------------- */
-async function findProductsAndCollections(q, limit = 4) {
-  const base = `${SUPABASE_URL}/rest/v1/web_pages`;
-  const sel  = 'url,title';
-  const like = encodeURIComponent(`*${q}*`);
-  const u = new URL(base);
-  u.searchParams.set('select', sel);
-  u.searchParams.set('or', `(title.ilike.${like},url.ilike.${like})`);
+/* ===================== PRODUCT/COLLECTION LINKS ==================== */
+async function findProductsAndCollections(q, limit = 6) {
+  const u = new URL(`${SUPABASE_URL}/rest/v1/web_pages`);
+  u.searchParams.set('select', 'url,title');
+  u.searchParams.set('or', `(title.ilike.*${encodeURIComponent(q)}*,url.ilike.*${encodeURIComponent(q)}*)`);
   u.searchParams.set('limit', String(Math.max(1, Math.min(limit, 8))));
   const r = await fetch(u.toString(), { headers: sbHeaders(false) });
   if (!r.ok) return [];
   const rows = (await r.json()) || [];
-  return rows
-    .filter(x => /\/(products|collections)\//i.test(x.url))
-    .slice(0, limit);
+  return rows.filter(x => /\/(products|collections)\//i.test(x.url)).slice(0, limit);
 }
 
-async function extLinks(q, limit = 4) {
+async function extLinks(q, limit = 3) {
   const u = new URL(`${SUPABASE_URL}/rest/v1/external_links`);
   u.searchParams.set('select', 'store,label,url,notes');
   u.searchParams.set('or', `(label.ilike.*${encodeURIComponent(q)}*,notes.ilike.*${encodeURIComponent(q)}*)`);
@@ -230,7 +128,82 @@ async function extLinks(q, limit = 4) {
   return r.ok ? r.json() : [];
 }
 
-/* ----------------------- SIZING HELPERS ----------------------- */
+/* ---------- Shopify live search (Storefront API) ---------- */
+async function shopifySearchProducts(userText, limit = 6) {
+  const endpoint = `https://${process.env.SHOPIFY_STORE_DOMAIN}/api/2024-10/graphql.json`;
+  const text = String(userText || '').toLowerCase();
+  const tokens = text.replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
+  const KEEP = new Set([
+    'knee','length','knee-length','kneelength',
+    'swim','swimwear','dress','one','piece','one-piece','onepiece',
+    'burkini','rash','guard','top','bottom','modest','islamic','full','coverage'
+  ]);
+  const terms = tokens.filter(t => KEEP.has(t));
+  const phrases = [];
+  if (text.includes('knee') && text.includes('length')) phrases.push('"knee length"');
+  if (text.includes('one') && text.includes('piece')) phrases.push('"one piece"');
+  if (text.includes('rash') && text.includes('guard')) phrases.push('"rash guard"');
+  if (text.includes('full') && text.includes('length')) phrases.push('"full length"');
+  if (text.includes('islamic')) phrases.push('islamic');
+
+  const unique = Array.from(new Set(terms));
+  const titleParts = unique.map(t => `title:*${t}*`);
+  const tagParts   = unique.map(t => `tag:${t}`);
+  const phraseParts= phrases.map(p => `title:${p}`);
+  let q = [...phraseParts, ...titleParts, ...tagParts, `product_type:swimwear`].filter(Boolean).join(' OR ');
+  if (!q) q = 'product_type:swimwear';
+
+  const r = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'X-Shopify-Storefront-Access-Token': process.env.SHOPIFY_STOREFRONT_TOKEN,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      query: `
+        query($q:String!, $n:Int!) {
+          products(first:$n, query:$q) {
+            edges { node { handle title onlineStoreUrl } }
+          }
+          collections(first:$n, query:$q) {
+            edges { node { handle title } }
+          }
+        }`,
+      variables: { q, n: limit }
+    })
+  });
+
+  if (!r.ok) return [];
+  const j = await r.json().catch(() => ({}));
+  const products = (j.data?.products?.edges || []).map(({ node }) => ({
+    title: node.title,
+    url: node.onlineStoreUrl || `https://megaska.com/products/${node.handle}`
+  }));
+  const collections = (j.data?.collections?.edges || []).map(({ node }) => ({
+    title: node.title,
+    url: `https://megaska.com/collections/${node.handle}`
+  }));
+
+  const hits = [...products, ...collections];
+  if (!hits.length) {
+    return [{ title: 'Search results on MEGASKA', url: `https://megaska.com/search?q=${encodeURIComponent(userText)}` }];
+  }
+  return hits.slice(0, limit);
+}
+
+function rankHits(hits, q) {
+  const t = q.toLowerCase();
+  return [...hits].sort((a,b) => {
+    const at = (a.title||'').toLowerCase(), bt = (b.title||'').toLowerCase();
+    const ae = at.includes(t), be = bt.includes(t);
+    if (ae !== be) return be - ae;                 // exact phrase first
+    const ac = /\/collections\//.test(a.url), bc = /\/collections\//.test(b.url);
+    if (ac !== bc) return ac - bc;                 // products before collections
+    return at.localeCompare(bt);
+  });
+}
+
+/* =========================== SIZING =========================== */
 async function fetchSizeChart() {
   const u = new URL(`${SUPABASE_URL}/rest/v1/size_chart`);
   u.searchParams.set('select', '*');
@@ -239,8 +212,38 @@ async function fetchSizeChart() {
   return r.ok ? r.json() : [];
 }
 
+function hasMeasurements(msg) {
+  return /(bust|chest)\s*\d{2,3}|waist\s*\d{2,3}|hip[s]?\s*\d{2,3}/i.test(msg);
+}
+
+function parseMeasurements(msg) {
+  const m = {
+    bust:  (msg.match(/(?:bust|chest)[^\d]{0,6}(\d{2,3})/i)  || [])[1],
+    waist: (msg.match(/waist[^\d]{0,6}(\d{2,3})/i)          || [])[1],
+    hip:   (msg.match(/hips?[^\d]{0,6}(\d{2,3})/i)          || [])[1]
+  };
+  let bust = m.bust ? +m.bust : null;
+  let waist = m.waist ? +m.waist : null;
+  let hip = m.hip ? +m.hip : null;
+  const looksCm = [bust, waist, hip].some(v => typeof v === 'number' && v >= 60);
+  if (looksCm) {
+    const toIn = v => (typeof v === 'number' ? +(v * 0.393700787).toFixed(1) : null);
+    bust = toIn(bust); waist = toIn(waist); hip = toIn(hip);
+  }
+  return { bust, waist, hip, unit: looksCm ? 'cm' : 'in' };
+}
+
+function missingMeasures({bust, waist, hip}) {
+  const miss = [];
+  if (bust == null) miss.push('bust');
+  if (waist == null) miss.push('waist');
+  if (hip == null) miss.push('hips');
+  return miss;
+}
+
+function formatInches(v) { return typeof v === 'number' ? `${v}"` : '—'; }
+
 function recommendSizeFromChart(chart, measures) {
-  // Convert once (don’t mutate across rows), then score per size.
   let { bust, waist, hip } = measures || {};
   const looksCm = [bust, waist, hip].some(v => typeof v === 'number' && v >= 60);
   const toIn = (v) => (typeof v === 'number' && !Number.isNaN(v) ? +(v * 0.393700787).toFixed(1) : null);
@@ -248,7 +251,6 @@ function recommendSizeFromChart(chart, measures) {
 
   const scored = chart.map(row => {
     let inside = 0, upsizes = 0;
-
     if (typeof bust === 'number') {
       if (bust >= row.bust_min && bust <= row.bust_max) inside++;
       else if (bust > row.bust_max) upsizes++;
@@ -261,62 +263,31 @@ function recommendSizeFromChart(chart, measures) {
       if (hip >= row.hip_min && hip <= row.hip_max) inside++;
       else if (hip > row.hip_max) upsizes++;
     }
-
-    const penalty = upsizes; // prefer sizes that don't need upsizing
-    return { row, score: inside, penalty };
+    return { row, score: inside, penalty: upsizes };
   });
 
   scored.sort((a, b) => b.score - a.score || a.penalty - b.penalty);
   return scored[0]?.row || null;
 }
 
-// === SIZING PARSE & UNIT DETECT ===
-function hasMeasurements(msg) {
-  return /(bust|chest)\s*\d{2,3}|waist\s*\d{2,3}|hip[s]?\s*\d{2,3}/i.test(msg);
-}
-
-function parseMeasurements(msg) {
-  // capture numbers near keywords (order independent)
-  const m = {
-    bust:  (msg.match(/(?:bust|chest)[^\d]{0,6}(\d{2,3})/i)  || [])[1],
-    waist: (msg.match(/waist[^\d]{0,6}(\d{2,3})/i)          || [])[1],
-    hip:   (msg.match(/hips?[^\d]{0,6}(\d{2,3})/i)          || [])[1]
-  };
-  let bust = m.bust ? +m.bust : null;
-  let waist = m.waist ? +m.waist : null;
-  let hip = m.hip ? +m.hip : null;
-
-  // unit detection: if any value looks like cm (>= 60), convert all present to inches
-  const looksCm = [bust, waist, hip].some(v => v && v >= 60);
-  if (looksCm) {
-    const toIn = v => (v ? +(v * 0.393700787).toFixed(1) : v);
-    bust = toIn(bust); waist = toIn(waist); hip = toIn(hip);
-  }
-  return { bust, waist, hip, unit: looksCm ? 'cm' : 'in' };
-}
-
-function formatInches(v) { return v ? `${v}"` : '—'; }
-
 function explainChoice(row, { bust, waist, hip }) {
   const lines = [];
-  const check = (name, val, lo, hi) => {
+  const ck = (name,val,lo,hi) => {
     if (typeof val !== 'number') return;
-    if (val < lo) lines.push(`• Your ${name} (${val}") is a bit **below** ${row.size} range ${lo}–${hi}". Consider one size **down** only if you prefer snug fits.`);
-    else if (val > hi) lines.push(`• Your ${name} (${val}") is **above** ${row.size} range ${lo}–${hi}". Consider one size **up** for comfort.`);
-    else lines.push(`• Your ${name} (${val}") sits **inside** ${row.size} range ${lo}–${hi}".`);
+    if (val < lo) lines.push(`• Your ${name} (${val}") is **below** ${row.size} ${lo}–${hi}". Consider one size down only for snug fit.`);
+    else if (val > hi) lines.push(`• Your ${name} (${val}") is **above** ${row.size} ${lo}–${hi}". Consider one size up for comfort.`);
+    else lines.push(`• Your ${name} (${val}") is **inside** ${row.size} ${lo}–${hi}".`);
   };
-  check('bust', bust, row.bust_min, row.bust_max);
-  check('waist', waist, row.waist_min, row.waist_max);
-  check('hips', hip, row.hip_min, row.hip_max);
+  ck('bust', bust, row.bust_min, row.bust_max);
+  ck('waist', waist, row.waist_min, row.waist_max);
+  ck('hips', hip, row.hip_min, row.hip_max);
   return lines.join('\n');
 }
 
-/* ----------------------- INTENT ----------------------- */
+/* =========================== INTENT ========================== */
 function intent(message) {
   const m = message.toLowerCase();
-  // If measurements are present, force sizing intent
   if (hasMeasurements(message)) return 'sizing';
-
   if (/(deliver|shipping|when.*arrive|how long|days.*reach)/i.test(m)) return 'delivery';
   if (/(return|exchange|refund)/i.test(m)) return 'returns';
   if (/(size|sizing|size\s*chart|measure|fit)/i.test(m)) return 'sizing';
@@ -327,8 +298,8 @@ function intent(message) {
   return 'general';
 }
 
-/* ----------------------- BRAND ANSWERS ----------------------- */
-function answerFromBrand(i) {
+/* ====================== BRAND ANSWER TEMPLATES ===================== */
+function answerFromBrand(i, extras = {}) {
   switch (i) {
     case 'delivery':
       return `Here’s how delivery works with ${BRAND.name}:
@@ -344,18 +315,20 @@ Share your city/pincode and I’ll estimate more precisely.`;
 Tell me your order number and what you’d like to change.`;
     case 'ordering':
       return `Ordering on ${BRAND.name}:
-- ${BRAND.ordering.steps.join('\n- ')}
+- ${["Choose style & size","Checkout","Instant confirmation","Pack in 1 business day & share tracking"].join('\n- ')}
 Need help at any step? I’m here.`;
     case 'payments':
       return `${BRAND.payments}
 If you face any issue at payment, tell me the screen/error and I’ll help.`;
     case 'promo':
-      return `Good news:
-- ${BRAND.promo.desc}
+      return extras.promo
+        ? `Use **${extras.promo.code}** — ${extras.promo.description || 'sitewide offer'}. Want me to pull items you can apply it to?`
+        : `Good news:
+- ${BRAND.promoDefault.desc}
 - ${BRAND.clearance}
-Want me to pull bestsellers you can apply **${BRAND.promo.code}** to?`;
+Want me to pull bestsellers you can apply **${BRAND.promoDefault.code}** to?`;
     case 'contact':
-      return `${BRAND.contact}`;
+      return extras.contact || BRAND.contactDefault;
     default:
       return `${BRAND.whatWeDo}
 Fabric: ${BRAND.materials}
@@ -364,7 +337,26 @@ What are you shopping for today (style/coverage/size)? I’ll recommend options.
   }
 }
 
-/* ----------------------- POLISH (owner voice) ----------------------- */
+/* =================== PROMOS / BRAND SETTINGS (DB) ================== */
+async function getActivePromo() {
+  const u = new URL(`${SUPABASE_URL}/rest/v1/promotions`);
+  u.searchParams.set('select','code,description,ends_at');
+  u.searchParams.set('active','eq.true');
+  u.searchParams.set('order','starts_at.desc');
+  u.searchParams.set('limit','1');
+  const r = await fetch(u.toString(), { headers: sbHeaders(false) });
+  return r.ok ? (await r.json())[0] : null;
+}
+
+async function getBrandSettings() {
+  const u = new URL(`${SUPABASE_URL}/rest/v1/brand_settings`);
+  u.searchParams.set('select','whatsapp,support_hours,shipping_blurb');
+  u.searchParams.set('limit','1');
+  const r = await fetch(u.toString(), { headers: sbHeaders(false) });
+  return r.ok ? (await r.json())[0] : null;
+}
+
+/* =========================== POLISH ========================== */
 async function polish(message, context) {
   const sys = `You are MEGHA, the official ${BRAND.name} assistant. Tone: ${BRAND.tone}.
 Speak as the brand owner. Never mention sources or third parties. No generic delivery tiers.
@@ -375,7 +367,7 @@ Prefer tight paragraphs and bullet points. End with a short CTA.`;
 Brand context:
 ${context}
 
-Write a short, specific reply in MEGASKA’s voice. If about delivery, say 3–5 working days across India and 1 business day dispatch. If about promo, mention code ${BRAND.promo.code}. End with a helpful CTA.`;
+Write a short, specific reply in MEGASKA’s voice. If about delivery, say 3–5 working days across India and 1 business day dispatch. If about promo, mention the live promo if provided. End with a helpful CTA.`;
 
   try {
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -395,23 +387,20 @@ Write a short, specific reply in MEGASKA’s voice. If about delivery, say 3–5
   }
 }
 
-/* ----------------------- HTTP HANDLER ----------------------- */
+/* ========================= HTTP HANDLER ======================= */
 export default async function handler(req) {
   const h = cors(req);
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: h });
-  if (req.method === 'GET')     return json({ ok: true, route: '/api/chat', version: 'megha-fastpath-v2', ts: Date.now() }, 200, h);
+  if (req.method === 'GET')     return json({ ok: true, route: '/api/chat', version: 'megha-bundle-v1', ts: Date.now() }, 200, h);
   if (req.method !== 'POST')    return json({ ok: false, error: 'Method not allowed' }, 405, h);
 
   try {
-    // ----- request body: accept both {message} and {messages:[...]} -----
+    // ---- Accept BOTH {message} and {messages:[...]} ----
     const body = await req.json().catch(() => ({}));
-
     function coerceToMessage(b) {
-      if (typeof b === 'string') return b.trim();           // raw string
-      if (b && typeof b.message === 'string' && b.message.trim()) return b.message.trim(); // {message}
-
-      // {messages:[...]}
+      if (typeof b === 'string') return b.trim();
+      if (b && typeof b.message === 'string' && b.message.trim()) return b.message.trim();
       if (Array.isArray(b?.messages) && b.messages.length) {
         const getText = (c) => {
           if (!c) return '';
@@ -431,35 +420,40 @@ export default async function handler(req) {
       }
       return '';
     }
-
     const message = coerceToMessage(body);
-    if (!message) {
-      return json({ ok: false, error: "Missing 'message' string or unreadable payload" }, 400, h);
-    }
+    if (!message) return json({ ok: false, error: "Missing 'message' string or unreadable payload" }, 400, h);
 
     // 1) Intent
     const i = intent(message);
 
-    // 2) Base answer
-    let base = answerFromBrand(i);
+    // 2) Promo/Brand settings (only if needed)
+    let livePromo = null, brandSet = null;
+    if (/(offer|discount|promo|coupon|sale|clearance)/i.test(message)) {
+      livePromo = await getActivePromo().catch(() => null);
+    }
+    if (/(contact|support|help|whatsapp|email|delivery|shipping)/i.test(message)) {
+      brandSet = await getBrandSettings().catch(() => null);
+    }
 
-    // 2a) Sizing special flow (ask for measurements + compute recommendation if present)
+    // 3) Base answer template
+    const baseTemplate = answerFromBrand(i, {
+      promo: livePromo,
+      contact: brandSet ? `WhatsApp/Call **${brandSet.whatsapp || '+91 9650957372'}**. Hours: ${brandSet.support_hours || '10:00–18:00 IST'}.` : null
+    });
+
+    // 4) Sizing dedicated flow
     if (i === 'sizing') {
       const chart = await fetchSizeChart();
       const { bust, waist, hip, unit } = parseMeasurements(message);
+      const miss = missingMeasures({ bust, waist, hip });
 
-      // If user didn’t give numbers → ask for them, do not show products
-      if (bust == null && waist == null && hip == null) {
-        const ask = `Let's get your best **MEGASKA brand size**:
-- Share **bust / waist / hips** (you can type like: "bust 36, waist 32, hips 38").
-- We accept **inches** or **cm** (we’ll detect it).
-If between sizes, choose the **larger** for a modest, comfy fit.`;
-        base = ask;
-        return json({ ok: true, reply: await polish(message, base) }, 200, h);
+      if (miss.length) {
+        const ask = `Got it. To recommend your MEGASKA size, I still need **${miss.join(' & ')}**. You can share in **cm or inches** — I’ll detect it.`;
+        return json({ ok: true, reply: await polish(message, ask) }, 200, h);
       }
 
-      // We have numbers → recommend a size
       const pick = recommendSizeFromChart(chart, { bust, waist, hip });
+      let base;
       if (pick) {
         const explain = explainChoice(pick, { bust, waist, hip });
         base =
@@ -470,65 +464,57 @@ Your best MEGASKA **brand size is: ${pick.size}**.
 
 ${explain || ''}
 
-Tip: Prefer a **relaxed** feel? Take one size **up**. Want **snug/active** fit? Stay with ${pick.size}.
-Need help picking a style (full-length Islamic, knee-length, dress type, tops/bottoms)? Tell me your preference and I’ll suggest styles.`;
+Tip: Prefer a **relaxed** feel? One size **up**. Want **snug/active** fit? Stay with **${pick.size}**. Need help picking a style (full-length Islamic, knee-length, dress type, tops/bottoms)? Tell me your preference.`;
       } else {
-        base = `Thanks! Your numbers sit across multiple ranges. If you share a photo or tell me your **fit preference** (snug / relaxed), I’ll fine-tune the size. Otherwise choose the **larger** size for swim comfort.`;
+        base = `Thanks! Your numbers sit across multiple ranges. If you prefer **relaxed** coverage, go **one size up**; for snug/active, try the smaller of the two. Share a fit preference and I’ll fine-tune.`;
       }
-
-      // IMPORTANT: Don’t attach product/collection links in a sizing-only reply
       const reply = await polish(message, base);
-      return json({ ok: true, reply }, 200, h);
+      return json({ ok: true, reply }, 200, h); // IMPORTANT: no links in pure sizing replies
     }
 
-    // 3) Quick enrichment (keyword first)
+    // 5) Knowledge enrichment (light → embed fallback)
     let extra = '';
     try {
       const term = i === 'delivery' ? 'shipping' : i;
       const [pHits, cHits] = await Promise.all([kwPages(term, 4), kwChunks(term, 6)]);
       const snippets = (cHits || []).slice(0, 3).map(x => (x.content || '').slice(0, 300));
       if (snippets.length) extra = `\n\n${snippets.join('\n\n')}`;
-    } catch { /* ignore */ }
-
-    // 4) If still thin and the question is long/specific, try embeddings briefly
+    } catch {}
     if (!extra && message.length > 30) {
       try {
         const qemb = await embed(message);
         const matches = await matchChunks(qemb, 8, 0.64);
         const enrich = (matches || []).slice(0, 3).map(m => (m.content || '').slice(0, 300)).join('\n\n');
         if (enrich) extra = `\n\n${enrich}`;
-      } catch { /* ignore */ }
+      } catch {}
     }
 
-    // 5) Product/Collection quick links + external links (Amazon/Myntra) when relevant
+    // 6) Product/Collection quick links (Shopify-first) + marketplaces
     let linkBlock = '';
     try {
       const wantsLinks = /(show|find|see|price|cost|buy|link|product|collection|swim|swimwear|burkini|dress|rash|one[- ]?piece|top|bottom|knee|full[- ]?length)/i.test(message);
       if (wantsLinks && i !== 'sizing') {
-        let hits = [];
-        try {
-          hits = await shopifySearchProducts(message, 6);
-        } catch (e) {
-          console.error('shopifySearchProducts error', e);
-        }
-        if (!hits.length) {
-          hits = await findProductsAndCollections(message, 6);
-        }
+        let hits = await shopifySearchProducts(message, 6).catch(() => []);
+        if (!hits.length) hits = await findProductsAndCollections(message, 6);
+        if (!hits.length) hits = [{ title: 'Search results on MEGASKA', url: `https://megaska.com/search?q=${encodeURIComponent(message)}` }];
+        hits = rankHits(hits, message).slice(0,6);
+
         if (hits.length) {
           linkBlock += '\n\n**Quick links:**\n' + hits.map(h => `- [${h.title || 'View'}](${h.url})`).join('\n');
         }
-        try {
-          const exts = await extLinks(message, 3);
-          if (exts.length) {
-            linkBlock += '\n\n**Also available on:**\n' + exts.map(e => `- ${e.store}: [${e.label}](${e.url})`).join('\n');
-          }
-        } catch {}
+        const exts = await extLinks(message, 3).catch(() => []);
+        if (exts.length) {
+          linkBlock += '\n\n**Also available on:**\n' + exts.map(e => `- ${e.store}: [${e.label}](${e.url})`).join('\n');
+        }
       }
-    } catch (e) {
-      console.error('linkBlock error', e);
-    }
+    } catch {}
 
-    // 6) Final polish (owner voice)
+    // 7) Final polish
+    // For delivery intent, prefer DB blurb if available
+    let base = baseTemplate;
+    if (i === 'delivery' && brandSet?.shipping_blurb) {
+      base = `${brandSet.shipping_blurb}\nShare your pincode for an ETA.`;
+    }
     const reply = await polish(message, `${base}${extra}${linkBlock}`.trim());
     return json({ ok: true, reply }, 200, h);
 
