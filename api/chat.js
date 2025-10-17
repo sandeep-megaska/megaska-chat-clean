@@ -172,9 +172,12 @@ function recommendSizeFromChart(chart, { bust, waist, hip }) {
 /* ----------------------- INTENT ----------------------- */
 function intent(message) {
   const m = message.toLowerCase();
+  // If measurements are present, force sizing intent
+  if (hasMeasurements(message)) return 'sizing';
+
   if (/(deliver|shipping|when.*arrive|how long|days.*reach)/i.test(m)) return 'delivery';
   if (/(return|exchange|refund)/i.test(m)) return 'returns';
-  if (/(size|sizing|size\s*chart|measure)/i.test(m)) return 'sizing';
+  if (/(size|sizing|size\s*chart|measure|fit)/i.test(m)) return 'sizing';
   if (/(order(ing)?|how to buy|checkout)/i.test(m)) return 'ordering';
   if (/(payment|cod|upi|card)/i.test(m)) return 'payments';
   if (/(offer|discount|promo|coupon|sale|clearance)/i.test(m)) return 'promo';
@@ -249,6 +252,46 @@ Write a short, specific reply in MEGASKA’s voice. If about delivery, say 3–5
     return context;
   }
 }
+// === SIZING PARSE & UNIT DETECT ===
+function hasMeasurements(msg) {
+  return /(bust|chest)\s*\d{2,3}|waist\s*\d{2,3}|hip[s]?\s*\d{2,3}/i.test(msg);
+}
+
+function parseMeasurements(msg) {
+  // capture numbers near keywords (order independent)
+  const m = {
+    bust:  (msg.match(/(?:bust|chest)[^\d]{0,6}(\d{2,3})/i)  || [])[1],
+    waist: (msg.match(/waist[^\d]{0,6}(\d{2,3})/i)          || [])[1],
+    hip:   (msg.match(/hips?[^\d]{0,6}(\d{2,3})/i)          || [])[1]
+  };
+  let bust = m.bust ? +m.bust : null;
+  let waist = m.waist ? +m.waist : null;
+  let hip = m.hip ? +m.hip : null;
+
+  // unit detection: if any value looks like cm (>= 60), convert all present to inches
+  const looksCm = [bust, waist, hip].some(v => v && v >= 60);
+  if (looksCm) {
+    const toIn = v => (v ? +(v * 0.393700787).toFixed(1) : v);
+    bust = toIn(bust); waist = toIn(waist); hip = toIn(hip);
+  }
+  return { bust, waist, hip, unit: looksCm ? 'cm' : 'in' };
+}
+
+function formatInches(v) { return v ? `${v}"` : '—'; }
+
+function explainChoice(row, { bust, waist, hip }) {
+  const lines = [];
+  const check = (name, val, lo, hi) => {
+    if (!val) return;
+    if (val < lo) lines.push(`• Your ${name} (${val}") is a bit **below** ${row.size} range ${lo}–${hi}". Consider one size **down** only if you prefer snug fits.`);
+    else if (val > hi) lines.push(`• Your ${name} (${val}") is **above** ${row.size} range ${lo}–${hi}". Consider one size **up** for comfort.`);
+    else lines.push(`• Your ${name} (${val}") sits **inside** ${row.size} range ${lo}–${hi}".`);
+  };
+  check('bust', bust, row.bust_min, row.bust_max);
+  check('waist', waist, row.waist_min, row.waist_max);
+  check('hips', hip, row.hip_min, row.hip_max);
+  return lines.join('\n');
+}
 
 /* ----------------------- HTTP HANDLER ----------------------- */
 export default async function handler(req) {
@@ -272,22 +315,42 @@ export default async function handler(req) {
 
     // 2a) Sizing special flow (ask for measurements + compute recommendation if present)
     if (i === 'sizing') {
-      const chart = await fetchSizeChart();
-      const ask = `Let's get you a precise fit:
-- Please share **bust/waist/hip** in cm (and height/weight if handy).
-- If between sizes, we suggest taking the **larger** for comfy swim.
+  const chart = await fetchSizeChart();
+  const { bust, waist, hip, unit } = parseMeasurements(message);
 
-Reply like: "bust 92, waist 76, hip 100".`;
-      const mm = message.match(/bust\s*([0-9]{2,3}).*waist\s*([0-9]{2,3}).*hip\s*([0-9]{2,3})/i);
-      if (mm && chart?.length) {
-        const choice = recommendSizeFromChart(chart, { bust:+mm[1], waist:+mm[2], hip:+mm[3] });
-        base = choice
-          ? `Based on your measures, **${choice.size}** should fit best.\nIf you prefer a relaxed fit, consider one size up.\n\n${ask}`
-          : ask;
-      } else {
-        base = ask;
-      }
-    }
+  // If user didn’t give numbers → ask for them, do not show products
+  if (!bust && !waist && !hip) {
+    const ask = `Let's get your best **MEGASKA brand size**:
+- Share **bust / waist / hips** (you can type like: "bust 36, waist 32, hips 38").
+- We accept **inches** or **cm** (we’ll detect it).  
+If between sizes, choose the **larger** for a modest, comfy fit.`;
+    base = ask;
+    // prevent product suggestions for pure sizing flow:
+    return json({ ok: true, reply: await polish(message, base) }, 200, h);
+  }
+
+  // We have numbers → recommend a size
+  const pick = recommendSizeFromChart(chart, { bust, waist, hip });
+  if (pick) {
+    const explain = explainChoice(pick, { bust, waist, hip });
+    base =
+`Based on your measurements (${unit} detected, converted to inches for matching):
+- **Bust:** ${formatInches(bust)}  | **Waist:** ${formatInches(waist)} | **Hips:** ${formatInches(hip)}
+
+Your best MEGASKA **brand size is: ${pick.size}**.
+
+${explain || ''}
+
+Tip: Prefer a **relaxed** feel? Take one size **up**. Want **snug/active** fit? Stay with ${pick.size}.
+Need help picking a style (full-length Islamic, knee-length, dress type, tops/bottoms)? Tell me your preference and I’ll suggest styles.`;
+  } else {
+    base = `Thanks! Your numbers sit across multiple ranges. If you share a photo or tell me your **fit preference** (snug / relaxed), I’ll fine-tune the size. Otherwise choose the **larger** size for swim comfort.`;
+  }
+
+  // IMPORTANT: Don’t attach product/collection links in a sizing-only reply
+  const reply = await polish(message, base);
+  return json({ ok: true, reply }, 200, h);
+}
 
     // 3) Quick enrichment (keyword first)
     let extra = '';
